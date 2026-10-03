@@ -1,0 +1,456 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DeviceStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+enum RoleCode {
+  ADMIN
+  MANAGER
+  SALES_EXECUTIVE
+}
+
+model Tenant {
+  id        Int      @id @default(autoincrement())
+  name      String
+  slug      String   @unique
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings  TenantSettings?
+  users     User[]
+  teams     Team[]
+  roles     Role[]
+  leads     Lead[]
+  customers Customer[]
+  followUps FollowUp[]
+  beatStops         BeatStop[]
+  visits            Visit[]
+  locationSessions  LocationSession[]
+  locationLogs      LocationLog[]
+  sales             Sale[]
+  monthlyTargets    MonthlyTarget[]
+}
+
+model TenantSettings {
+  id                               Int      @id @default(autoincrement())
+  tenantId                         Int      @unique
+  liveLocationEnabled              Boolean  @default(false)
+  visitCheckinRadiusMeters         Int      @default(100)
+  trackingIntervalSeconds          Int      @default(300)
+  trackingSignificantMovementMeters Int     @default(100)
+  timezone                         String   @default("Asia/Kolkata")
+  workStart                        String   @default("09:00")
+  workEnd                          String   @default("19:00")
+  locationRawRetentionDays         Int      @default(90)
+  allowDuplicateLeads              Boolean  @default(false)
+  autoCloseFieldSessionHours       Int      @default(12)
+  allowUnverifiedCheckin           Boolean  @default(false)
+  currency                         String   @default("INR")
+  createdAt                        DateTime @default(now())
+  updatedAt                        DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Role {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  code      RoleCode
+  name      String
+  createdAt DateTime @default(now())
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userRoles UserRole[]
+
+  @@unique([tenantId, code])
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  tenantId     Int
+  name         String
+  phone        String
+  email        String?
+  passwordHash String
+  status        UserStatus @default(ACTIVE)
+  platformAdmin Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roles           UserRole[]
+  teamMembers     TeamMember[]
+  devices         Device[]
+  refreshTokens   RefreshToken[]
+  assignedLeads   Lead[]     @relation("LeadAssignee")
+  createdLeads    Lead[]     @relation("LeadCreator")
+  assignedCustomers Customer[] @relation("CustomerOwner")
+  followUps       FollowUp[]
+  beatStops         BeatStop[]
+  visits            Visit[]
+  locationSessions  LocationSession[]
+  locationLogs      LocationLog[]
+  sales             Sale[]
+  monthlyTargets    MonthlyTarget[]
+
+  @@unique([tenantId, phone])
+}
+
+model UserRole {
+  userId Int
+  roleId Int
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model Team {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members TeamMember[]
+}
+
+model TeamMember {
+  teamId Int
+  userId Int
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+}
+
+model Device {
+  id          Int          @id @default(autoincrement())
+  userId      Int
+  deviceUid   String
+  platform    String       @default("android")
+  appVersion  String?
+  status      DeviceStatus @default(ACTIVE)
+  lastSeenAt  DateTime     @default(now())
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@unique([userId, deviceUid])
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  deviceId  Int?
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+}
+
+enum LeadStatus {
+  NEW
+  ASSIGNED
+  CONTACTED
+  FOLLOW_UP
+  WON
+  LOST
+}
+
+enum LeadSource {
+  MANUAL
+  MANAGER
+  IMPORT
+}
+
+enum Temperature {
+  HOT
+  WARM
+  COLD
+}
+
+enum FollowUpType {
+  CALL
+  VISIT
+  WHATSAPP
+}
+
+model Lead {
+  id            Int          @id @default(autoincrement())
+  tenantId      Int
+  name          String
+  phone         String
+  contactPerson String?
+  businessType  String?
+  address       String?
+  city          String?
+  latitude      Decimal?     @db.Decimal(10, 7)
+  longitude     Decimal?     @db.Decimal(10, 7)
+  notes         String?      @db.Text
+  source        LeadSource   @default(MANUAL)
+  status        LeadStatus   @default(NEW)
+  temperature   Temperature  @default(WARM)
+  potential     Decimal?     @db.Decimal(12, 2)
+  assigneeId    Int?
+  createdById   Int
+  customerId    Int?
+  clientRequestId String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee  User?      @relation("LeadAssignee", fields: [assigneeId], references: [id])
+  createdBy User       @relation("LeadCreator", fields: [createdById], references: [id])
+  customer  Customer?  @relation(fields: [customerId], references: [id])
+  followUps FollowUp[]
+  beatStops BeatStop[]
+  visits    Visit[]
+  sales     Sale[]
+
+  @@unique([tenantId, clientRequestId])
+  @@index([tenantId, phone])
+  @@index([tenantId, assigneeId, status])
+}
+
+model Customer {
+  id            Int       @id @default(autoincrement())
+  tenantId      Int
+  name          String
+  phone         String
+  contactPerson String?
+  businessType  String?
+  address       String?
+  city          String?
+  latitude      Decimal?  @db.Decimal(10, 7)
+  longitude     Decimal?  @db.Decimal(10, 7)
+  gstin         String?
+  notes         String?   @db.Text
+  ownerId       Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner     User?      @relation("CustomerOwner", fields: [ownerId], references: [id])
+  leads     Lead[]
+  followUps FollowUp[]
+  beatStops BeatStop[]
+  visits    Visit[]
+  sales     Sale[]
+
+  @@unique([tenantId, phone])
+}
+
+model FollowUp {
+  id         Int          @id @default(autoincrement())
+  tenantId   Int
+  userId     Int
+  leadId     Int?
+  customerId Int?
+  type       FollowUpType
+  dueAt      DateTime
+  doneAt     DateTime?
+  notes      String?
+  clientRequestId String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, clientRequestId])
+  @@index([tenantId, userId, dueAt])
+}
+
+enum VisitStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum VisitOutcome {
+  SUCCESS
+  UNAVAILABLE
+}
+
+model BeatStop {
+  id         Int       @id @default(autoincrement())
+  tenantId   Int
+  userId     Int
+  leadId     Int?
+  customerId Int?
+  sequence   Int       @default(1)
+  plannedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  visits   Visit[]
+
+  @@index([tenantId, userId, plannedAt])
+}
+
+model Visit {
+  id                 Int           @id @default(autoincrement())
+  tenantId           Int
+  userId             Int
+  leadId             Int?
+  customerId         Int?
+  beatStopId         Int?
+  status             VisitStatus   @default(IN_PROGRESS)
+  outcome            VisitOutcome?
+  notes              String?       @db.Text
+  checkedInAt        DateTime
+  checkedOutAt       DateTime?
+  checkinLat         Decimal       @db.Decimal(10, 7)
+  checkinLng         Decimal       @db.Decimal(10, 7)
+  checkinAccuracy    Decimal?      @db.Decimal(8, 2)
+  distanceMeters     Int?
+  verified           Boolean       @default(false)
+  photoPath          String?
+  photoLat           Decimal?      @db.Decimal(10, 7)
+  photoLng           Decimal?      @db.Decimal(10, 7)
+  photoAccuracy      Decimal?      @db.Decimal(8, 2)
+  photoCapturedAt    DateTime?
+  photoReceivedAt    DateTime?
+  managerConfirmedAt DateTime?
+  saleAmount         Decimal?      @db.Decimal(12, 2)
+  collectionAmount   Decimal?      @db.Decimal(12, 2)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  beatStop BeatStop? @relation(fields: [beatStopId], references: [id], onDelete: SetNull)
+  sales    Sale[]
+
+  @@index([tenantId, userId, checkedInAt])
+}
+
+model Sale {
+  id               Int      @id @default(autoincrement())
+  tenantId         Int
+  userId           Int
+  customerId       Int?
+  leadId           Int?
+  visitId          Int?
+  amount           Decimal  @db.Decimal(12, 2)
+  collectionAmount Decimal? @db.Decimal(12, 2)
+  note             String?  @db.Text
+  billPhotoPath    String?
+  clientRequestId  String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  visit    Visit?    @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, clientRequestId])
+  @@index([tenantId, userId, createdAt])
+}
+
+model MonthlyTarget {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  userId    Int
+  year      Int
+  month     Int
+  amount    Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, year, month])
+  @@index([tenantId, year, month])
+}
+
+enum LocationSessionStatus {
+  ACTIVE
+  ENDED
+}
+
+enum SessionEndReason {
+  USER
+  ADMIN_OFF
+  AUTO_CLOSE
+}
+
+model LocationSession {
+  id             Int                   @id @default(autoincrement())
+  tenantId       Int
+  userId         Int
+  status         LocationSessionStatus @default(ACTIVE)
+  startedAt      DateTime              @default(now())
+  endedAt        DateTime?
+  endedReason    SessionEndReason?
+  lastLat        Decimal?              @db.Decimal(10, 7)
+  lastLng        Decimal?              @db.Decimal(10, 7)
+  lastAccuracy   Decimal?              @db.Decimal(8, 2)
+  lastSeenAt     DateTime?
+  pointCount     Int                   @default(0)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs   LocationLog[]
+
+  @@index([tenantId, userId, status])
+}
+
+model LocationLog {
+  id         Int      @id @default(autoincrement())
+  tenantId   Int
+  sessionId  Int
+  userId     Int
+  lat        Decimal  @db.Decimal(10, 7)
+  lng        Decimal  @db.Decimal(10, 7)
+  accuracy   Decimal? @db.Decimal(8, 2)
+  speed      Decimal? @db.Decimal(8, 2)
+  heading    Decimal? @db.Decimal(8, 2)
+  mocked     Boolean  @default(false)
+  battery    Int?
+  capturedAt DateTime
+  receivedAt DateTime @default(now())
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session LocationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, capturedAt])
+  @@index([tenantId, userId, receivedAt])
+}
