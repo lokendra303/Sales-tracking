@@ -1,12 +1,17 @@
 function apiBase() {
-  const fromEnv = import.meta.env.VITE_API_URL as string | undefined;
-  if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    if (host && host !== "localhost" && host !== "127.0.0.1") {
-      return `http://${host}:3000`;
-    }
+  const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "http://localhost:3000";
+  if (typeof window === "undefined") return fromEnv;
+  const pageHost = window.location.hostname;
+  if (!pageHost || pageHost === "localhost" || pageHost === "127.0.0.1") return fromEnv;
+  try {
+    const api = new URL(fromEnv);
+    const apiIsLocal = api.hostname === "localhost" || api.hostname === "127.0.0.1";
+    if (!apiIsLocal) return fromEnv;
+    const port = api.port ? `:${api.port}` : "";
+    return `${api.protocol}//${pageHost}${port}`;
+  } catch {
+    return fromEnv;
   }
-  return fromEnv || "http://localhost:3000";
 }
 
 export const API_BASE = apiBase();
