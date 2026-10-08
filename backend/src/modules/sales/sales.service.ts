@@ -172,6 +172,13 @@ export async function createSale(input: {
 
     if (leadId) {
       const lead = await tx.lead.findFirst({ where: { id: leadId, tenantId: input.tenantId } });
+      if (lead && lead.approvalStatus !== "APPROVED") {
+        throw badRequest(
+          lead.approvalStatus === "REJECTED"
+            ? "The manager rejected this lead."
+            : "This lead is waiting for manager approval.",
+        );
+      }
       if (lead && lead.status !== "LOST") {
         await tx.lead.update({ where: { id: lead.id }, data: { status: "WON" } });
       }

@@ -42,12 +42,15 @@ export function publicLead(lead: {
   notes: string | null;
   source: string;
   status: string;
+  approvalStatus?: string;
+  rejectionNote?: string | null;
   temperature: string;
   potential: unknown;
   assigneeId: number | null;
   customerId: number | null;
   createdAt: Date;
   assignee?: { id: number; name: string } | null;
+  createdBy?: { id: number; name: string } | null;
   followUps?: { id: number; type: string; dueAt: Date; doneAt: Date | null; notes: string | null }[];
 }) {
   const nextFollowUp = lead.followUps
@@ -68,6 +71,9 @@ export function publicLead(lead: {
     notes: lead.notes,
     source: lead.source,
     status: lead.status,
+    approvalStatus: lead.approvalStatus ?? "APPROVED",
+    rejectionNote: lead.rejectionNote ?? null,
+    createdByName: lead.createdBy?.name ?? null,
     temperature: lead.temperature,
     potential: lead.potential ? Number(lead.potential) : null,
     assigneeId: lead.assigneeId,

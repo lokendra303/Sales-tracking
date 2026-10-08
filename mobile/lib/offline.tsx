@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppState, Platform } from "react-native";
-import { api, apiUpload, isOfflineError } from "./api";
+import { api, apiUpload, ApiError, isOfflineError } from "./api";
 import { persistGet, persistSet } from "./persist";
+import { dropPhoto } from "./photos";
+import { pruneLocalVisits } from "./local-visits";
 import { useAuth } from "./auth";
 
 export type OfflineJob = {
@@ -14,6 +16,11 @@ export type OfflineJob = {
   fileUri?: string;
   createdAt: string;
   tries: number;
+  /** Do not send until this earlier job has succeeded. */
+  afterId?: string;
+  /** Job whose server id replaces {visitId} or {saleId}. */
+  bindFrom?: string;
+  bind?: "visit" | "sale";
 };
 
 type OfflineState = {
@@ -40,6 +47,45 @@ async function readJobs() {
 
 async function writeJobs(jobs: OfflineJob[]) {
   await persistSet("queue", JSON.stringify(jobs.slice(0, 200)));
+}
+
+async function readResults() {
+  const raw = await persistGet("jobResults");
+  return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+}
+
+async function writeResults(results: Record<string, number>) {
+  const entries = Object.entries(results).slice(-300);
+  await persistSet("jobResults", JSON.stringify(Object.fromEntries(entries)));
+}
+
+function prepare(job: OfflineJob, done: Record<string, number>): OfflineJob | "wait" | "drop" {
+  if (job.afterId) {
+    const parent = done[job.afterId];
+    if (parent == null) return "wait";
+    if (parent < 0) return "drop";
+  }
+  if (!job.bindFrom || !job.bind) return job;
+  const id = done[job.bindFrom];
+  if (id == null) return "wait";
+  if (id < 0) return "drop";
+  const token = job.bind === "sale" ? "{saleId}" : "{visitId}";
+  const path = job.path.replace(token, String(id));
+  let body = job.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const copy = { ...(body as Record<string, unknown>) };
+    if (job.bind === "visit" && "visitId" in copy) copy.visitId = id;
+    if (job.bind === "sale" && "saleId" in copy) copy.saleId = id;
+    body = copy;
+  }
+  return { ...job, path, body };
+}
+
+function benign(job: OfflineJob, err: unknown) {
+  if (!(err instanceof ApiError)) return false;
+  if (job.kind === "visit-complete" && /already finished/i.test(err.message)) return true;
+  if (job.kind === "gps" && /not running/i.test(err.message)) return true;
+  return false;
 }
 
 export function OfflineProvider({ children }: { children: ReactNode }) {
@@ -79,6 +125,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const flush = useCallback(async () => {
     if (!accessToken) return;
     const queued = await readJobs();
+    const done = await readResults();
     if (!queued.length) {
       try {
         await api("/health", { token: accessToken });
@@ -93,29 +140,60 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     }
 
     const remain: OfflineJob[] = [];
+    let stopped = false;
     for (const job of queued) {
+      if (stopped) {
+        remain.push(job);
+        continue;
+      }
+      const ready = prepare(job, done);
+      if (ready === "wait") {
+        remain.push(job);
+        continue;
+      }
+      if (ready === "drop") {
+        done[job.id] = -1;
+        dropPhoto(job.fileUri);
+        continue;
+      }
       try {
-        if (job.fileUri) {
-          await apiUpload(job.path, { token: accessToken, fileUri: job.fileUri, fields: (job.body as Record<string, string | number | undefined>) ?? {} });
-        } else {
-          await api(job.path, {
-            method: job.method ?? "POST",
-            token: accessToken,
-            body: job.body != null ? JSON.stringify(job.body) : undefined,
-          });
-        }
+        const data = ready.fileUri
+          ? await apiUpload<{ id?: number }>(ready.path, {
+              token: accessToken,
+              fileUri: ready.fileUri,
+              fields: (ready.body as Record<string, string | number | undefined>) ?? {},
+            })
+          : await api<{ id?: number }>(ready.path, {
+              method: ready.method ?? "POST",
+              token: accessToken,
+              body: ready.body != null ? JSON.stringify(ready.body) : undefined,
+            });
+        done[job.id] = typeof data?.id === "number" ? data.id : (ready.bindFrom ? done[ready.bindFrom] ?? 0 : 0);
+        dropPhoto(ready.fileUri);
         setOnline(true);
       } catch (err) {
         if (isOfflineError(err)) {
           setOnline(false);
-          remain.push(job, ...queued.slice(queued.indexOf(job) + 1));
-          break;
+          stopped = true;
+          remain.push(job);
+          continue;
         }
-        if (job.tries >= 6) continue;
+        if (benign(job, err)) {
+          done[job.id] = job.bindFrom ? done[job.bindFrom] ?? 0 : 0;
+          dropPhoto(job.fileUri);
+          continue;
+        }
+        if (job.tries >= 6) {
+          done[job.id] = -1;
+          dropPhoto(job.fileUri);
+          continue;
+        }
         remain.push({ ...job, tries: job.tries + 1 });
       }
     }
+    await writeResults(done);
     await writeJobs(remain);
+    await pruneLocalVisits(new Set(remain.map((job) => job.id)), done);
     setJobs(remain);
     if (!remain.length) {
       const now = new Date().toISOString();

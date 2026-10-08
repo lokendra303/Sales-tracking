@@ -80,3 +80,13 @@ export function statusLabel(status: string) {
   };
   return map[status] ?? status;
 }
+
+export function leadStateLabel(lead: { status: string; approvalStatus?: string }) {
+  if (lead.approvalStatus === "PENDING") return "Waiting for approval";
+  if (lead.approvalStatus === "REJECTED") return "Rejected";
+  return statusLabel(lead.status);
+}
+
+export function leadIsOpen(lead: { approvalStatus?: string }) {
+  return !lead.approvalStatus || lead.approvalStatus === "APPROVED";
+}

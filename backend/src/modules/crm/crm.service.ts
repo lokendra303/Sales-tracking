@@ -7,8 +7,18 @@ import type { RoleCode } from "@prisma/client";
 
 const leadInclude = {
   assignee: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true } },
   followUps: { orderBy: { dueAt: "asc" as const } },
 };
+
+function requireApproved(lead: { approvalStatus: string }) {
+  if (lead.approvalStatus === "PENDING") {
+    throw badRequest("This lead is waiting for manager approval.");
+  }
+  if (lead.approvalStatus === "REJECTED") {
+    throw badRequest("The manager rejected this lead.");
+  }
+}
 
 export async function listLeads(input: {
   tenantId: number;
@@ -37,15 +47,17 @@ export async function listLeads(input: {
             ],
           }
         : {},
-      input.filter === "new"
-        ? { status: { in: ["NEW", "ASSIGNED"] } }
-        : input.filter === "follow-up"
-          ? { status: { in: ["CONTACTED", "FOLLOW_UP"] } }
-          : input.filter === "won"
-            ? { status: "WON" }
-            : input.q
-              ? {}
-              : { status: { not: "LOST" } },
+      input.filter === "pending"
+        ? { approvalStatus: "PENDING" }
+        : input.filter === "new"
+          ? { status: { in: ["NEW", "ASSIGNED"] }, approvalStatus: "APPROVED" }
+          : input.filter === "follow-up"
+            ? { status: { in: ["CONTACTED", "FOLLOW_UP"] }, approvalStatus: "APPROVED" }
+            : input.filter === "won"
+              ? { status: "WON" }
+              : input.q
+                ? {}
+                : { status: { not: "LOST" }, approvalStatus: { not: "REJECTED" } },
     ],
   };
 
@@ -177,6 +189,7 @@ export async function createLead(input: {
   }
   const assigneeId = manager ? input.assigneeId ?? null : input.userId;
   const status: LeadStatus = assigneeId ? "ASSIGNED" : "NEW";
+  const approvalStatus = manager ? "APPROVED" : "PENDING";
   let latitude = parseCoord(input.latitude, -90, 90);
   let longitude = parseCoord(input.longitude, -180, 180);
   if ((latitude == null || longitude == null) && (input.address || input.city)) {
@@ -201,6 +214,7 @@ export async function createLead(input: {
       temperature: input.temperature ?? "WARM",
       source: manager ? "MANAGER" : "MANUAL",
       status,
+      approvalStatus,
       assigneeId,
       createdById: input.userId,
       clientRequestId,
@@ -290,6 +304,7 @@ export async function importLeads(input: {
         temperature: "WARM",
         source: "IMPORT",
         status: assignee ? "ASSIGNED" : "NEW",
+        approvalStatus: "APPROVED",
         assigneeId: assignee?.id ?? null,
         createdById: input.userId,
       },
@@ -321,8 +336,8 @@ export async function updateLead(
   },
 ) {
   const current = await getLead(tenantId, userId, roles, id);
-  if (data.status === "WON" || data.status === "LOST") {
-    // allowed
+  if (data.status && current.approvalStatus !== "APPROVED") {
+    requireApproved(current);
   }
   let latitude = data.latitude;
   let longitude = data.longitude;
@@ -350,6 +365,7 @@ export async function markContacted(tenantId: number, userId: number, roles: Rol
   if (!lead) {
     throw notFound("Lead not found.");
   }
+  requireApproved(lead);
   if (lead.status === "NEW" || lead.status === "ASSIGNED") {
     const updated = await prisma.lead.update({
       where: { id },
@@ -388,6 +404,34 @@ export async function assignLead(
   return publicLead(updated);
 }
 
+export async function decideLead(
+  tenantId: number,
+  userId: number,
+  roles: RoleCode[],
+  id: number,
+  decision: "APPROVED" | "REJECTED",
+  note?: string,
+) {
+  if (!isManager(roles)) {
+    throw forbidden("Only a manager can approve leads.");
+  }
+  const lead = await prisma.lead.findFirst({ where: { id, tenantId } });
+  if (!lead) {
+    throw notFound("Lead not found.");
+  }
+  const updated = await prisma.lead.update({
+    where: { id },
+    data: {
+      approvalStatus: decision,
+      approvedById: userId,
+      approvedAt: new Date(),
+      rejectionNote: decision === "REJECTED" ? note?.trim() || null : null,
+    },
+    include: leadInclude,
+  });
+  return publicLead(updated);
+}
+
 export async function convertLead(tenantId: number, userId: number, roles: RoleCode[], id: number) {
   const lead = await prisma.lead.findFirst({
     where: { id, ...leadScope(tenantId, userId, roles) },
@@ -395,6 +439,7 @@ export async function convertLead(tenantId: number, userId: number, roles: RoleC
   if (!lead) {
     throw notFound("Lead not found.");
   }
+  requireApproved(lead);
   if (lead.customerId) {
     throw badRequest("This lead is already a customer.");
   }
@@ -509,7 +554,8 @@ export async function createFollowUp(input: {
   }
 
   if (input.leadId) {
-    await getLead(input.tenantId, input.userId, input.roles, input.leadId);
+    const lead = await getLead(input.tenantId, input.userId, input.roles, input.leadId);
+    requireApproved(lead);
   }
 
   const followUp = await prisma.followUp.create({
@@ -621,8 +667,9 @@ export async function homeSummary(tenantId: number, userId: number, roles: RoleC
     ? { tenantId, year: start.getFullYear(), month: start.getMonth() + 1 }
     : { tenantId, userId, year: start.getFullYear(), month: start.getMonth() + 1 };
 
-  const [todayLeads, overdueFollowUps, upcoming, todayVisits, overdueItems, todaySale, monthSale, monthTarget] = await Promise.all([
-    prisma.lead.count({ where: { ...leadWhere, createdAt: { gte: start, lte: end } } }),
+  const [todayLeads, pendingApprovals, overdueFollowUps, upcoming, todayVisits, overdueItems, todaySale, monthSale, monthTarget] = await Promise.all([
+    prisma.lead.count({ where: { ...leadWhere, createdAt: { gte: start, lte: end }, approvalStatus: "APPROVED" } }),
+    prisma.lead.count({ where: { ...leadWhere, approvalStatus: "PENDING" } }),
     prisma.followUp.count({ where: { ...followWhere, dueAt: { lt: new Date() } } }),
     prisma.followUp.findMany({
       where: followWhere,
@@ -657,6 +704,7 @@ export async function homeSummary(tenantId: number, userId: number, roles: RoleC
 
   return {
     todayLeads,
+    pendingApprovals,
     overdueFollowUps,
     todayVisits,
     todaySalesCount: todaySale._count,

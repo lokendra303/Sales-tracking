@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, router, useLocalSearchParams, type Href } from "expo-router";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
 import { ActionRow, Badge, Button, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type BeatPlan, type BeatToday, type Visit } from "@/lib/api";
+import { readLocalVisits, type LocalVisit } from "@/lib/local-visits";
 import { openCall, openNavigate, openWhatsApp, tomorrowDay, when } from "@/lib/format";
 import { isManager } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
@@ -23,6 +24,7 @@ export default function VisitsScreen() {
   const [beat, setBeat] = useState<BeatToday | null>(null);
   const [tomorrow, setTomorrow] = useState<BeatPlan | null>(null);
   const [proofs, setProofs] = useState<Visit[]>([]);
+  const [drafts, setDrafts] = useState<LocalVisit[]>([]);
   const [exec, setExec] = useState<ExecValue>(execFromParam(params.userId));
   const [loading, setLoading] = useState(true);
 
@@ -32,6 +34,7 @@ export default function VisitsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      readLocalVisits().then(setDrafts);
       if (!accessToken) return;
       if (manager) {
         const qs = typeof exec === "number" ? `&userId=${exec}` : "";
@@ -89,9 +92,21 @@ export default function VisitsScreen() {
   }
 
   return (
-    <Screen header={<ScreenHeader title="Visits" subtitle="Today’s beat · check in, then take a shop photo" />}>
-      {loading || !beat ? (
+      <Screen header={<ScreenHeader title="Visits" subtitle="Today’s beat · check in, then take a shop photo" />}>
+      {drafts.map((draft) => (
+        <Pressable key={draft.localId} style={styles.active} onPress={() => router.push({ pathname: "/visit/draft", params: { id: draft.localId } } as unknown as Href)}>
+          <Badge label="Saved on phone" tone="amber" />
+          <Text style={styles.name}>{draft.name}</Text>
+          <Text style={typo.muted}>
+            {draft.photoUri ? "Live photo and GPS saved" : "GPS saved · take the live photo"}
+            {" · sends when the network is back"}
+          </Text>
+        </Pressable>
+      ))}
+      {loading && !beat ? (
         <ActivityIndicator color={colors.blue} />
+      ) : !beat ? (
+        <EmptyState icon="location-outline" text="No network. Visits saved on this phone will send automatically." />
       ) : (
         <>
           {beat.activeVisit ? (
@@ -155,7 +170,7 @@ export default function VisitsScreen() {
                       <Text style={styles.ok}>Sale ₹{stop.saleAmount}</Text>
                     ) : null}
                   </>
-                ) : beat.activeVisit ? null : (
+                ) : beat.activeVisit || drafts.some((draft) => draft.leadId === stop.leadId || draft.customerId === stop.customerId) ? null : (
                   <Button title="Check location" tone="green" onPress={() => router.push({ pathname: "/visit/check-in", params })} />
                 )}
               </Card>

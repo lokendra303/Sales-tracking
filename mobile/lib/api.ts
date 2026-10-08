@@ -44,6 +44,9 @@ export type Lead = {
   notes: string | null;
   source: string;
   status: string;
+  approvalStatus?: string;
+  rejectionNote?: string | null;
+  createdByName?: string | null;
   temperature: string;
   potential: number | null;
   assigneeId: number | null;

@@ -1,4 +1,5 @@
 node_modules
+salestrack.sql
 dist
 .env
 *.log

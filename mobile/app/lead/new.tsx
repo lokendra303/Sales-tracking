@@ -63,11 +63,16 @@ export default function NewLeadScreen() {
       assigneeId: office && assigneeId ? assigneeId : undefined,
     };
     try {
-      const lead = await api<{ id: number }>("/leads", {
+      const lead = await api<{ id: number; approvalStatus?: string }>("/leads", {
         method: "POST",
         token: accessToken,
         body: JSON.stringify(payload),
       });
+      if (lead.approvalStatus === "PENDING") {
+        Alert.alert("Sent for approval", "Your manager needs to approve this lead before you can visit it.");
+        router.replace("/leads");
+        return;
+      }
       router.replace(`/lead/${lead.id}`);
     } catch (err) {
       if (isOfflineError(err)) {
@@ -77,7 +82,12 @@ export default function NewLeadScreen() {
           path: "/leads",
           body: payload,
         });
-        Alert.alert("Saved on this phone", "We will send this lead when you are back on Wi-Fi.");
+        Alert.alert(
+          "Saved on this phone",
+          office
+            ? "We will send this lead when you are back on Wi-Fi."
+            : "We will send this lead when you are back on Wi-Fi. Your manager still has to approve it.",
+        );
         router.replace("/leads");
         return;
       }

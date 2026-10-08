@@ -46,6 +46,14 @@ export function HomePage() {
           </article>
         ) : null}
         {manager ? (
+          <article className="card kpi">
+            <p className="kicker">Lead approval</p>
+            <p className="stat">{home?.pendingApprovals ?? 0}</p>
+            <p className="muted">New leads from the field, waiting for you</p>
+            <Link to="/leads?approval=pending">Review leads</Link>
+          </article>
+        ) : null}
+        {manager ? (
           <>
             <article className="card kpi">
               <p className="kicker">Today</p>

@@ -68,7 +68,7 @@ async function missedForUser(tenantId: number, userId: number, start: Date, end:
   let items = stops;
   if (!items.length) {
     const leads = await prisma.lead.findMany({
-      where: { tenantId, assigneeId: userId, status: { notIn: ["WON", "LOST"] } },
+      where: { tenantId, assigneeId: userId, status: { notIn: ["WON", "LOST"] }, approvalStatus: "APPROVED" },
       select: { id: true, name: true, phone: true },
       take: 20,
     });
@@ -227,7 +227,7 @@ export async function funnel(tenantId: number, userId: number, roles: RoleCode[]
 
   const [leads, visits, sales] = await Promise.all([
     prisma.lead.findMany({
-      where: { ...leadWhere, createdAt: { gte: start, lte: end } },
+      where: { ...leadWhere, createdAt: { gte: start, lte: end }, approvalStatus: "APPROVED" },
       select: { id: true },
     }),
     prisma.visit.findMany({

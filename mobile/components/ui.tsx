@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  findNodeHandle,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -32,23 +33,49 @@ type ScreenProps = {
 export function Screen({ children, header, scroll = true, keyboard = false, padded = true }: ScreenProps) {
   const { pagePad, compact } = useLayout();
   const [kb, setKb] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (!keyboard) return;
-    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", (event) => {
-      setKb(event.endCoordinates?.height ?? 260);
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvent, (event) => {
+      setKb(event.endCoordinates?.height ?? 280);
     });
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setKb(0));
+    const hide = Keyboard.addListener(hideEvent, () => setKb(0));
     return () => {
       show.remove();
       hide.remove();
     };
   }, [keyboard]);
 
+  useEffect(() => {
+    if (!keyboard || !scroll || kb <= 0) return;
+    const timer = setTimeout(() => {
+      const focused = (TextInput.State as { currentlyFocusedInput?: () => object | null }).currentlyFocusedInput?.();
+      const node = focused ? findNodeHandle(focused as never) : null;
+      const responder = scrollRef.current?.getScrollResponder?.() as
+        | {
+            scrollResponderScrollNativeHandleToKeyboard?: (
+              nodeHandle: number,
+              additionalOffset: number,
+              preventNegativeScrollOffset?: boolean,
+            ) => void;
+          }
+        | undefined;
+      if (node && responder?.scrollResponderScrollNativeHandleToKeyboard) {
+        responder.scrollResponderScrollNativeHandleToKeyboard(node, 120, true);
+        return;
+      }
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [kb, keyboard, scroll]);
+
   const contentStyle = {
     paddingHorizontal: padded ? pagePad : 0,
     paddingTop: 4,
-    paddingBottom: (keyboard ? 48 : 36) + (keyboard && Platform.OS !== "ios" ? Math.max(kb, 0) : 0),
+    paddingBottom: (keyboard ? 32 : 36) + (keyboard ? kb : 0),
     gap: compact ? 12 : 14,
     width: "100%" as const,
     maxWidth: 560,
@@ -58,12 +85,14 @@ export function Screen({ children, header, scroll = true, keyboard = false, padd
 
   const body = scroll ? (
     <ScrollView
+      ref={scrollRef}
       style={styles.flex}
       contentContainerStyle={contentStyle}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-      automaticallyAdjustKeyboardInsets={keyboard}
-      showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
+      scrollEnabled
+      showsVerticalScrollIndicator={kb > 0}
     >
       {children}
     </ScrollView>
@@ -168,9 +197,9 @@ export function Field({
           {...props}
           multiline={multiline}
           placeholderTextColor={colors.muted}
-          style={[styles.input, multiline && styles.inputTall, props.style]}
+          style={[styles.input, multiline && styles.inputTall, right ? styles.inputWithIcon : null, props.style]}
         />
-        {right}
+        {right ? <View style={styles.inputIcon}>{right}</View> : null}
       </View>
     </View>
   );
@@ -196,13 +225,18 @@ export function PasswordField({
       placeholder={placeholder}
       secureTextEntry={!show}
       autoCapitalize="none"
+      autoCorrect={false}
+      autoComplete="password"
+      textContentType="password"
       right={
         <Pressable
           style={styles.eye}
+          hitSlop={8}
           onPress={() => setShow((on) => !on)}
+          accessibilityRole="button"
           accessibilityLabel={show ? "Hide password" : "Show password"}
         >
-          <Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={20} color={colors.blue} />
+          <Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={22} color={colors.blue} />
         </Pressable>
       }
     />
@@ -427,8 +461,17 @@ const styles = StyleSheet.create({
   },
   inputWrapTall: { alignItems: "flex-start", minHeight: 96 },
   input: { flex: 1, paddingHorizontal: 14, paddingVertical: 14, fontSize: 16, color: colors.text },
+  inputWithIcon: { paddingRight: 52 },
   inputTall: { minHeight: 88, textAlignVertical: "top" },
-  eye: { paddingHorizontal: 14, paddingVertical: 12 },
+  inputIcon: {
+    position: "absolute",
+    right: 4,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    zIndex: 2,
+  },
+  eye: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   btn: {
     borderRadius: radius.pill,
     paddingVertical: 14,

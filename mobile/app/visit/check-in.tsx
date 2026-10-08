@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { Alert, StyleSheet, Text } from "react-native";
 import * as Location from "expo-location";
 import { Button, Card, Screen, ScreenHeader } from "@/components/ui";
@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { api, isOfflineError, type BeatToday, type CheckPreview, type Visit } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
 import { persistGet } from "@/lib/persist";
+import { saveLocalVisit } from "@/lib/local-visits";
 import { useOffline } from "@/lib/offline";
 import { openNavigate } from "@/lib/format";
 import { colors, typo } from "@/lib/theme";
@@ -96,19 +97,56 @@ export default function CheckInScreen() {
       const visit = await api<Visit>("/visits/check-in", {
         method: "POST",
         token: accessToken,
-        body: JSON.stringify({ ...target, ...coords }),
+        body: JSON.stringify({ ...target, ...coords, checkedInAt: new Date().toISOString() }),
       });
       router.replace(`/visit/${visit.id}`);
     } catch (err) {
-      if (isOfflineError(err) && coords) {
-        await offline.enqueue({
+      if (isOfflineError(err) && coords && preview) {
+        const checkedInAt = new Date().toISOString();
+        const job = await offline.enqueue({
           kind: "check-in",
-          label: `Check-in · ${preview?.name ?? "shop"}`,
+          label: `Check-in · ${preview.name}`,
           path: "/visits/check-in",
-          body: { ...target, ...coords },
+          body: {
+            ...target,
+            ...coords,
+            checkedInAt,
+          },
         });
-        Alert.alert("Saved on this phone", "Check-in will send when you are back on Wi-Fi. Take the place photo after it syncs.");
-        router.replace("/visits");
+        const localId = `local-${Date.now()}`;
+        await saveLocalVisit({
+          localId,
+          name: preview.name,
+          phone: preview.phone,
+          address: preview.address,
+          city: preview.city,
+          placeLat: preview.placeLat,
+          placeLng: preview.placeLng,
+          leadId: preview.leadId ?? undefined,
+          customerId: preview.customerId ?? undefined,
+          beatStopId: preview.beatStopId ?? undefined,
+          checkinLat: coords.lat,
+          checkinLng: coords.lng,
+          checkinAccuracy: coords.accuracy,
+          checkedInAt,
+          distanceMeters: preview.distanceMeters,
+          verified: preview.withinRadius,
+          photoUri: null,
+          photoLat: null,
+          photoLng: null,
+          photoCapturedAt: null,
+          notes: "",
+          outcome: null,
+          checkInJobId: job.id,
+          photoJobId: null,
+          completeJobId: null,
+        });
+        Alert.alert(
+          "Saved on this phone",
+          "GPS is stored. Take the live shop photo now. Photo and location upload together when the network is back.",
+        );
+        router.replace({ pathname: "/visit/draft", params: { id: localId } } as unknown as Href);
+        void offline.flush();
         return;
       }
       Alert.alert("Cannot start visit", err instanceof Error ? err.message : "Try again at the shop.");
@@ -147,7 +185,7 @@ export default function CheckInScreen() {
         />
       ) : null}
       <Button title="Start visit" tone="green" onPress={startVisit} disabled={!canStart || loading} />
-      <Text style={styles.hint}>The server checks the distance. The phone cannot mark you as there.</Text>
+      <Text style={styles.hint}>No network is fine. GPS and the live photo stay on this phone and send automatically.</Text>
     </Screen>
   );
 }

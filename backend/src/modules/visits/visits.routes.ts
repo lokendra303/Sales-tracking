@@ -71,7 +71,7 @@ visitsRouter.post(
 visitsRouter.post(
   "/visits/check-in",
   asyncHandler(async (req, res) => {
-    const body = gpsSchema.parse(req.body);
+    const body = gpsSchema.extend({ checkedInAt: z.string().optional() }).parse(req.body);
     const data = await visits.checkIn({
       tenantId: req.auth!.tenantId,
       userId: req.auth!.userId,
@@ -143,6 +143,7 @@ visitsRouter.post(
         outcome: z.enum(["SUCCESS", "UNAVAILABLE"]),
         notes: z.string().optional(),
         collectionAmount: z.number().nonnegative().optional(),
+        checkedOutAt: z.string().optional(),
       })
       .parse(req.body);
     const data = await visits.completeVisit({

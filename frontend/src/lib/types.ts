@@ -70,6 +70,7 @@ export type FieldTeammate = {
 
 export type HomeData = {
   todayLeads: number;
+  pendingApprovals?: number;
   overdueFollowUps: number;
   todayVisits?: number;
   todaySalesCount?: number;

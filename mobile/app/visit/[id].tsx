@@ -7,6 +7,7 @@ import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/componen
 import { useAuth } from "@/lib/auth";
 import { api, apiUpload, fetchVisitPhoto, isOfflineError, visitPhotoUri, type Visit } from "@/lib/api";
 import { useOffline } from "@/lib/offline";
+import { keepPhoto } from "@/lib/photos";
 import { openCall, openNavigate, openWhatsApp, when } from "@/lib/format";
 import { isManager, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
@@ -63,6 +64,7 @@ export default function VisitScreen() {
     const position = permission.granted
       ? await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
       : null;
+    const kept = await keepPhoto(fileUri, `visit-${visit.id}-${Date.now()}`);
     const fields = {
       lat: position?.coords.latitude,
       lng: position?.coords.longitude,
@@ -72,7 +74,7 @@ export default function VisitScreen() {
     try {
       await apiUpload<Visit>(`/visits/${visit.id}/photo`, {
         token: accessToken,
-        fileUri,
+        fileUri: kept,
         fields,
       });
       setCapturing(false);
@@ -83,7 +85,7 @@ export default function VisitScreen() {
           kind: "visit-photo",
           label: `Place photo · ${visit.name}`,
           path: `/visits/${visit.id}/photo`,
-          fileUri,
+          fileUri: kept,
           body: fields,
         });
         setCapturing(false);
@@ -119,7 +121,7 @@ export default function VisitScreen() {
       await api(`/visits/${visit.id}/complete`, {
         method: "POST",
         token: accessToken,
-        body: JSON.stringify({ outcome, notes: notes || undefined }),
+        body: JSON.stringify({ outcome, notes: notes || undefined, checkedOutAt: new Date().toISOString() }),
       });
       if (outcome === "SUCCESS") {
         router.replace({
@@ -135,7 +137,7 @@ export default function VisitScreen() {
           kind: "visit-complete",
           label: `Complete visit · ${visit.name}`,
           path: `/visits/${visit.id}/complete`,
-          body: { outcome, notes: notes || undefined },
+          body: { outcome, notes: notes || undefined, checkedOutAt: new Date().toISOString() },
         });
         Alert.alert("Saved on this phone", "Visit complete will send when you are back on Wi-Fi.");
         router.replace("/visits");

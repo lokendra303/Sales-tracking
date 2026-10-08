@@ -178,6 +178,28 @@ crmRouter.post(
 );
 
 crmRouter.post(
+  "/leads/:id/approval",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        decision: z.enum(["APPROVED", "REJECTED"]),
+        note: z.string().max(500).optional(),
+      })
+      .parse(req.body);
+    const data = await crm.decideLead(
+      req.auth!.tenantId,
+      req.auth!.userId,
+      req.auth!.roles,
+      Number(req.params.id),
+      body.decision,
+      body.note,
+    );
+    res.json({ success: true, data });
+  }),
+);
+
+crmRouter.post(
   "/leads/:id/assign",
   requireRole("MANAGER"),
   asyncHandler(async (req, res) => {

@@ -6,7 +6,7 @@ import { ActionRow, Badge, Button, Card, EmptyState, Screen, ScreenHeader } from
 import { useAuth } from "@/lib/auth";
 import { api, type Lead } from "@/lib/api";
 import { useReminders } from "@/lib/reminders-context";
-import { money, openCall, openNavigate, openWhatsApp, statusLabel, tempColor, when } from "@/lib/format";
+import { leadIsOpen, leadStateLabel, money, openCall, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
 import { isManager, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
@@ -38,6 +38,21 @@ export default function LeadDetailScreen() {
       load();
     }, [load]),
   );
+
+  async function decide(decision: "APPROVED" | "REJECTED") {
+    if (!accessToken || !id) return;
+    try {
+      await api(`/leads/${id}/approval`, {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ decision }),
+      });
+      Alert.alert(decision === "APPROVED" ? "Approved" : "Rejected", decision === "APPROVED" ? "The executive can visit this lead now." : "The salesperson will see that this lead was rejected.");
+      load();
+    } catch (err) {
+      Alert.alert("Could not update", err instanceof Error ? err.message : "Try again.");
+    }
+  }
 
   async function convert() {
     if (!accessToken || !id) return;
@@ -104,11 +119,37 @@ export default function LeadDetailScreen() {
           </Text>
         ) : null}
         <Text style={typo.muted}>
-          {money(lead.potential)} · {statusLabel(lead.status)}
+          {money(lead.potential)} · {leadStateLabel(lead)}
           {lead.assigneeName ? ` · ${lead.assigneeName}` : ""}
+          {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}
         </Text>
+        {lead.approvalStatus === "PENDING" ? (
+          <Text style={typo.body}>
+            {office ? "Approve this lead before the executive can visit it." : "Your manager still needs to approve this lead."}
+          </Text>
+        ) : null}
+        {lead.approvalStatus === "REJECTED" ? (
+          <Text style={typo.body}>{lead.rejectionNote || "Your manager rejected this lead."}</Text>
+        ) : null}
         {lead.notes ? <Text style={typo.body}>{lead.notes}</Text> : null}
       </Card>
+
+      {office && lead.approvalStatus === "PENDING" ? (
+        <ActionRow>
+          <Button title="Approve" tone="green" flex onPress={() => decide("APPROVED")} />
+          <Button
+            title="Reject"
+            tone="red"
+            flex
+            onPress={() =>
+              Alert.alert("Reject this lead?", "The salesperson will see that you rejected it.", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Reject", style: "destructive", onPress: () => decide("REJECTED") },
+              ])
+            }
+          />
+        </ActionRow>
+      ) : null}
 
       <ActionRow>
         <Button
@@ -116,7 +157,9 @@ export default function LeadDetailScreen() {
           flex
           onPress={() => {
             openCall(lead.phone);
-            api(`/leads/${lead.id}/contacted`, { method: "POST", token: accessToken }).catch(() => undefined);
+            if (leadIsOpen(lead)) {
+              api(`/leads/${lead.id}/contacted`, { method: "POST", token: accessToken }).catch(() => undefined);
+            }
           }}
         />
         <Button title="WhatsApp" tone="green" flex onPress={() => openWhatsApp(lead.phone)} />
@@ -141,7 +184,7 @@ export default function LeadDetailScreen() {
           onPress={() => openNavigate(lead.latitude, lead.longitude, [lead.address, lead.city].filter(Boolean).join(", "))}
         />
       ) : null}
-      {sales ? (
+      {sales && leadIsOpen(lead) ? (
         <Button
           title="Start visit"
           tone="green"
@@ -167,17 +210,19 @@ export default function LeadDetailScreen() {
         </Card>
       ) : null}
 
-      <Button
-        title="Add follow-up"
-        tone="outline"
-        onPress={() => router.push({ pathname: "/follow-up/new", params: { leadId: String(lead.id) } })}
-      />
+      {leadIsOpen(lead) ? (
+        <Button
+          title="Add follow-up"
+          tone="outline"
+          onPress={() => router.push({ pathname: "/follow-up/new", params: { leadId: String(lead.id) } })}
+        />
+      ) : null}
 
-      {!lead.customerId && lead.status !== "LOST" ? (
+      {leadIsOpen(lead) && !lead.customerId && lead.status !== "LOST" ? (
         <Button title="Convert to customer" tone="outline" onPress={convert} />
       ) : null}
 
-      {lead.status !== "LOST" && !lead.customerId ? (
+      {leadIsOpen(lead) && lead.status !== "LOST" && !lead.customerId ? (
         <Button title="Mark lost" tone="ghost" onPress={markLost} />
       ) : null}
 

@@ -26,10 +26,11 @@ export default function HomeScreen() {
   const roles = user?.roles ?? [];
   const offlineMessage = !offline.online
     ? offline.pending
-      ? `${offline.pending} waiting to send · no internet`
+      ? `${offline.pending} saved on this phone · sends when the network is back`
       : "No internet · showing last saved work"
-    : `${offline.pending} waiting to send · tap to retry`;
+    : `${offline.pending} saved on this phone · sending now`;
   const [todayLeads, setTodayLeads] = useState(0);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const [todayVisits, setTodayVisits] = useState(0);
   const [todaySales, setTodaySales] = useState(0);
   const [monthSales, setMonthSales] = useState(0);
@@ -46,6 +47,7 @@ export default function HomeScreen() {
       if (!accessToken) return;
       api<{
         todayLeads: number;
+        pendingApprovals?: number;
         overdueFollowUps: number;
         todayVisits?: number;
         todaySalesAmount?: number;
@@ -56,6 +58,7 @@ export default function HomeScreen() {
       }>("/home", { token: accessToken })
         .then((data) => {
           setTodayLeads(data.todayLeads);
+          setPendingApprovals(data.pendingApprovals ?? 0);
           setTodayVisits(data.todayVisits ?? 0);
           setTodaySales(data.todaySalesAmount ?? 0);
           setMonthSales(data.monthSalesAmount ?? 0);
@@ -150,6 +153,9 @@ export default function HomeScreen() {
           {field.session?.lastSeenAt && field.session.liveStreaming ? (
             <Text style={typo.muted}>Last point {ageLabel(field.session.lastSeenAgeSeconds)}</Text>
           ) : null}
+          {field.queuedPoints > 0 ? (
+            <Text style={styles.warn}>{field.queuedPoints} GPS points are on this phone. They send when the network is back.</Text>
+          ) : null}
           {field.weakGps ? <Text style={styles.warn}>GPS is weak. Keep the visit going — we will not stop the day.</Text> : null}
           {field.notice ? <Text style={styles.warn}>{field.notice}</Text> : null}
           {field.session?.status === "ACTIVE" ? (
@@ -208,6 +214,21 @@ export default function HomeScreen() {
             {user?.liveLocationEnabled ? "On" : "Off"} for their teams.
           </Text>
           <Button title="Open settings" onPress={() => router.push("/settings")} />
+        </Card>
+      ) : null}
+
+      {pendingApprovals > 0 ? (
+        <Card>
+          <Text style={styles.cardTitle}>{isManager(roles) ? "Leads to approve" : "Waiting for approval"}</Text>
+          <Text style={typo.muted}>
+            {isManager(roles)
+              ? `${pendingApprovals} new lead${pendingApprovals === 1 ? "" : "s"} from the field need your approval.`
+              : `${pendingApprovals} lead${pendingApprovals === 1 ? "" : "s"} you added ${pendingApprovals === 1 ? "is" : "are"} waiting for your manager.`}
+          </Text>
+          <Button
+            title={isManager(roles) ? "Review leads" : "View waiting leads"}
+            onPress={() => router.push({ pathname: "/leads", params: { filter: "pending" } })}
+          />
         </Card>
       ) : null}
 

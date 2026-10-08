@@ -15,6 +15,9 @@ type Lead = {
   latitude: number | null;
   longitude: number | null;
   status: string;
+  approvalStatus?: string;
+  rejectionNote?: string | null;
+  createdByName?: string | null;
   assigneeId: number | null;
   assigneeName: string | null;
 };
@@ -43,6 +46,24 @@ export function LeadDetailPage() {
   useEffect(() => {
     load().catch(() => setError("Could not load this lead."));
   }, [accessToken, id]);
+
+  async function decide(decision: "APPROVED" | "REJECTED") {
+    if (!accessToken || !lead) return;
+    setError("");
+    setNotice("");
+    try {
+      setLead(
+        await api<Lead>(`/leads/${lead.id}/approval`, {
+          method: "POST",
+          token: accessToken,
+          body: JSON.stringify({ decision }),
+        }),
+      );
+      setNotice(decision === "APPROVED" ? "Lead approved. The executive can visit it." : "Lead rejected.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update approval.");
+    }
+  }
 
   async function assign(userId: number) {
     if (!accessToken || !lead) return;
@@ -99,8 +120,25 @@ export function LeadDetailPage() {
       <h1>{lead.name}</h1>
       <p className="muted">
         {lead.phone}
-        {lead.contactPerson ? ` · ${lead.contactPerson}` : ""} · {lead.assigneeName || "Unassigned"} · {lead.status}
+        {lead.contactPerson ? ` · ${lead.contactPerson}` : ""} · {lead.assigneeName || "Unassigned"} ·{" "}
+        {lead.approvalStatus === "PENDING"
+          ? "Needs approval"
+          : lead.approvalStatus === "REJECTED"
+            ? "Rejected"
+            : lead.status}
+        {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}
       </p>
+      {lead.approvalStatus === "PENDING" ? (
+        <div className="toolbar">
+          <button className="btn green" type="button" onClick={() => decide("APPROVED")}>
+            Approve
+          </button>
+          <button className="btn red" type="button" onClick={() => decide("REJECTED")}>
+            Reject
+          </button>
+        </div>
+      ) : null}
+      {lead.approvalStatus === "REJECTED" && lead.rejectionNote ? <p className="error">{lead.rejectionNote}</p> : null}
       <p className="muted">{[lead.address, lead.city].filter(Boolean).join(", ") || "No address yet"}</p>
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}

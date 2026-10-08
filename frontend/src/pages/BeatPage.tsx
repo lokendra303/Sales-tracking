@@ -21,6 +21,7 @@ type Place = {
   phone: string;
   city: string | null;
   status?: string;
+  approvalStatus?: string;
   assigneeId?: number | null;
 };
 
@@ -61,6 +62,7 @@ export function BeatPage() {
 
   const available = places.filter((place) => {
     if (place.status === "LOST") return false;
+    if (place.kind === "lead" && place.approvalStatus && place.approvalStatus !== "APPROVED") return false;
     if (taken.has(`${place.kind}:${place.id}`)) return false;
     if (place.kind === "lead" && userId && place.assigneeId && place.assigneeId !== userId) return false;
     if (!q.trim()) return true;

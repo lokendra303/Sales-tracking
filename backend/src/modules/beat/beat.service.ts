@@ -116,6 +116,9 @@ export async function addStop(input: {
   if (input.leadId) {
     const lead = await prisma.lead.findFirst({ where: { id: input.leadId, tenantId: input.tenantId } });
     if (!lead) throw notFound("Lead not found.");
+    if (lead.approvalStatus !== "APPROVED") {
+      throw badRequest("Approve this lead before adding it to the beat.");
+    }
     if (lead.status === "LOST") throw badRequest("Do not put a lost lead on the beat.");
     if (!lead.assigneeId) {
       await prisma.lead.update({

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
 import {
@@ -17,12 +17,13 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type Customer, type Lead } from "@/lib/api";
-import { money, openCall, openNavigate, openWhatsApp, statusLabel, tempColor, when } from "@/lib/format";
+import { leadIsOpen, leadStateLabel, money, openCall, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
 import { isSales } from "@/lib/roles";
 import { colors } from "@/lib/theme";
 
 const filters = [
   { id: "all", label: "All" },
+  { id: "pending", label: "Approval" },
   { id: "new", label: "New" },
   { id: "follow-up", label: "Follow-up" },
   { id: "won", label: "Won" },
@@ -37,11 +38,11 @@ function execFromParam(raw?: string): ExecValue {
 
 export default function LeadsScreen() {
   const { accessToken, user } = useAuth();
-  const params = useLocalSearchParams<{ assigneeId?: string }>();
+  const params = useLocalSearchParams<{ assigneeId?: string; filter?: string }>();
   const { manager: office, people } = useExecutives();
   const sales = isSales(user?.roles);
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(params.filter === "pending" ? "pending" : "all");
   const [exec, setExec] = useState<ExecValue>(execFromParam(params.assigneeId));
   const [leads, setLeads] = useState<Lead[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -50,6 +51,12 @@ export default function LeadsScreen() {
   useEffect(() => {
     setExec(execFromParam(params.assigneeId));
   }, [params.assigneeId]);
+
+  useEffect(() => {
+    if (params.filter === "pending" || params.filter === "new" || params.filter === "follow-up" || params.filter === "won" || params.filter === "all") {
+      setFilter(params.filter);
+    }
+  }, [params.filter]);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -98,7 +105,12 @@ export default function LeadsScreen() {
         <SearchBox placeholder="Search name or phone" value={q} onChangeText={setQ} onSubmit={load} />
         <View style={styles.filters}>
           {filters.map((item) => (
-            <Chip key={item.id} label={item.label} on={filter === item.id} onPress={() => setFilter(item.id)} />
+            <Chip
+              key={item.id}
+              label={item.id === "pending" ? (office ? "To approve" : "Waiting") : item.label}
+              on={filter === item.id}
+              onPress={() => setFilter(item.id)}
+            />
           ))}
         </View>
         {office ? <ExecFilter people={people} value={exec} onChange={setExec} includeUnassigned /> : null}
@@ -117,7 +129,8 @@ export default function LeadsScreen() {
                     <Badge label={temp.label} tone={lead.temperature === "HOT" ? "red" : lead.temperature === "COLD" ? "blue" : "amber"} />
                   </View>
                   <Text style={styles.meta}>
-                    {money(lead.potential)} · {statusLabel(lead.status)}
+                    {money(lead.potential)} · {leadStateLabel(lead)}
+                    {office && lead.createdByName ? ` · ${lead.createdByName}` : ""}
                     {office && lead.assigneeName ? ` · ${lead.assigneeName}` : ""}
                     {lead.city ? ` · ${lead.city}` : ""}
                     {lead.latitude != null ? " · Map pin" : ""}
@@ -130,7 +143,9 @@ export default function LeadsScreen() {
                     flex
                     onPress={() => {
                       openCall(lead.phone);
-                      api(`/leads/${lead.id}/contacted`, { method: "POST", token: accessToken }).catch(() => undefined);
+                      if (leadIsOpen(lead)) {
+                        api(`/leads/${lead.id}/contacted`, { method: "POST", token: accessToken }).catch(() => undefined);
+                      }
                     }}
                   />
                   <Button title="WhatsApp" tone="green" flex onPress={() => openWhatsApp(lead.phone)} />
@@ -142,13 +157,54 @@ export default function LeadsScreen() {
                       onPress={() => openNavigate(lead.latitude, lead.longitude, [lead.address, lead.city].filter(Boolean).join(", "))}
                     />
                   ) : null}
-                  {sales ? (
+                  {sales && leadIsOpen(lead) ? (
                     <Button
                       title="Visit"
                       tone="outline"
                       flex
                       onPress={() => router.push({ pathname: "/visit/check-in", params: { leadId: String(lead.id) } })}
                     />
+                  ) : null}
+                  {office && lead.approvalStatus === "PENDING" ? (
+                    <>
+                      <Button
+                        title="Approve"
+                        tone="green"
+                        flex
+                        onPress={() => {
+                          api(`/leads/${lead.id}/approval`, {
+                            method: "POST",
+                            token: accessToken,
+                            body: JSON.stringify({ decision: "APPROVED" }),
+                          })
+                            .then(load)
+                            .catch(() => undefined);
+                        }}
+                      />
+                      <Button
+                        title="Reject"
+                        tone="red"
+                        flex
+                        onPress={() =>
+                          Alert.alert("Reject this lead?", `${lead.name} will stay off the salesperson's visits.`, [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Reject",
+                              style: "destructive",
+                              onPress: () => {
+                                api(`/leads/${lead.id}/approval`, {
+                                  method: "POST",
+                                  token: accessToken,
+                                  body: JSON.stringify({ decision: "REJECTED" }),
+                                })
+                                  .then(load)
+                                  .catch(() => undefined);
+                              },
+                            },
+                          ])
+                        }
+                      />
+                    </>
                   ) : null}
                 </ActionRow>
               </Card>
@@ -171,9 +227,13 @@ export default function LeadsScreen() {
             <EmptyState
               icon="briefcase-outline"
               text={
-                sales
-                  ? "No leads assigned to you yet. Your manager will assign shops here."
-                  : "No leads in this view. Assign a shop to an executive, or tap +."
+                filter === "pending"
+                  ? office
+                    ? "No leads are waiting for approval."
+                    : "No leads are waiting for your manager."
+                  : sales
+                    ? "No leads assigned to you yet. A lead you add waits here until your manager approves it."
+                    : "No leads in this view. Assign a shop to an executive, or tap +."
               }
             />
           ) : null}

@@ -108,6 +108,16 @@ export async function previewCheckin(input: {
   };
 }
 
+function clientTime(value?: string) {
+  const now = new Date();
+  if (!value) return now;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return now;
+  if (at.getTime() > now.getTime() + 2 * 60 * 1000) return now;
+  if (now.getTime() - at.getTime() > 14 * 24 * 60 * 60 * 1000) return now;
+  return at;
+}
+
 export async function checkIn(input: {
   tenantId: number;
   userId: number;
@@ -118,6 +128,7 @@ export async function checkIn(input: {
   lat: number;
   lng: number;
   accuracy?: number;
+  checkedInAt?: string;
 }) {
   if (isManager(input.roles)) {
     throw forbidden("Managers review visits. They do not check in.");
@@ -133,6 +144,13 @@ export async function checkIn(input: {
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: input.tenantId } });
   const place = await loadPlace(input);
+  if (place.lead && place.lead.approvalStatus !== "APPROVED") {
+    throw badRequest(
+      place.lead.approvalStatus === "REJECTED"
+        ? "The manager rejected this lead."
+        : "This lead is waiting for manager approval.",
+    );
+  }
   if (!place.beatStopId) {
     const { start, end } = dayBounds();
     const stop = await prisma.beatStop.findFirst({
@@ -162,7 +180,7 @@ export async function checkIn(input: {
       leadId: place.leadId,
       customerId: place.customerId,
       beatStopId: place.beatStopId,
-      checkedInAt: new Date(),
+      checkedInAt: clientTime(input.checkedInAt),
       checkinLat: input.lat,
       checkinLng: input.lng,
       checkinAccuracy: input.accuracy,
@@ -241,7 +259,7 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
   let items = stops;
   if (!items.length) {
     const leads = await prisma.lead.findMany({
-      where: { tenantId, assigneeId: userId, status: { notIn: ["WON", "LOST"] } },
+      where: { tenantId, assigneeId: userId, status: { notIn: ["WON", "LOST"] }, approvalStatus: "APPROVED" },
       orderBy: { updatedAt: "desc" },
       take: 20,
     });
@@ -344,6 +362,7 @@ export async function completeVisit(input: {
   outcome: "SUCCESS" | "UNAVAILABLE";
   notes?: string;
   collectionAmount?: number;
+  checkedOutAt?: string;
 }) {
   if (isManager(input.roles)) {
     throw forbidden("Managers review visits. They do not complete field visits.");
@@ -354,7 +373,7 @@ export async function completeVisit(input: {
     include: visitInclude,
   });
   if (!visit) throw notFound("Visit not found.");
-  if (visit.status !== "IN_PROGRESS") throw badRequest("This visit is already finished.");
+  if (visit.status !== "IN_PROGRESS") return publicVisit(visit);
   if (input.outcome === "SUCCESS" && !visit.photoPath) {
     throw badRequest("Take a place photo before completing a successful visit.");
   }
@@ -366,7 +385,7 @@ export async function completeVisit(input: {
         status: "COMPLETED",
         outcome: input.outcome,
         notes: input.notes,
-        checkedOutAt: new Date(),
+        checkedOutAt: clientTime(input.checkedOutAt),
         collectionAmount: input.collectionAmount,
       },
       include: visitInclude,

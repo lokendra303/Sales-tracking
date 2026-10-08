@@ -6,10 +6,17 @@ import { Button, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, apiUpload, isOfflineError, type Sale } from "@/lib/api";
 import { useOffline } from "@/lib/offline";
+import { keepPhoto } from "@/lib/photos";
 import { colors, typo } from "@/lib/theme";
 
 export default function RecordSaleScreen() {
-  const { visitId, name } = useLocalSearchParams<{ visitId?: string; name?: string }>();
+  const { visitId, name, checkInJobId, completeJobId, localId } = useLocalSearchParams<{
+    visitId?: string;
+    name?: string;
+    checkInJobId?: string;
+    completeJobId?: string;
+    localId?: string;
+  }>();
   const { accessToken } = useAuth();
   const offline = useOffline();
   const [amount, setAmount] = useState("");
@@ -17,8 +24,31 @@ export default function RecordSaleScreen() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
+  async function saveBill(fileUri: string, saleId: number | null, saleJobId: string | null) {
+    const kept = await keepPhoto(fileUri, `bill-${localId || saleId || Date.now()}`);
+    if (saleId) {
+      try {
+        await apiUpload<Sale>(`/sales/${saleId}/bill`, { token: accessToken, fileUri: kept });
+        return;
+      } catch (err) {
+        if (!isOfflineError(err)) throw err;
+      }
+    }
+    await offline.enqueue({
+      kind: "sale-bill",
+      label: `Bill photo · ${name || "shop"}`,
+      path: saleId ? `/sales/${saleId}/bill` : "/sales/{saleId}/bill",
+      fileUri: kept,
+      afterId: saleId ? undefined : saleJobId ?? undefined,
+      bindFrom: saleId ? undefined : saleJobId ?? undefined,
+      bind: saleId ? undefined : "sale",
+    });
+  }
+
   async function save() {
-    if (!accessToken || !visitId) return;
+    if (!accessToken) return;
+    const linked = !visitId && completeJobId && checkInJobId;
+    if (!visitId && !linked) return;
     const value = Number(amount);
     if (!(value > 0)) {
       Alert.alert("Sale amount", "Enter the rupee amount of this sale.");
@@ -30,48 +60,61 @@ export default function RecordSaleScreen() {
       return;
     }
     setBusy(true);
+    const clientRequestId = localId ? `local:${localId}` : `visit:${visitId}`;
+    const payload = {
+      visitId: visitId ? Number(visitId) : 0,
+      amount: value,
+      collectionAmount: collected,
+      note: note.trim() || undefined,
+      clientRequestId,
+    };
+    let serverSaleId: number | null = null;
+    let saleJobId: string | null = null;
     try {
-      const sale = await api<Sale>("/sales", {
-        method: "POST",
-        token: accessToken,
-        body: JSON.stringify({
-          visitId: Number(visitId),
-          amount: value,
-          collectionAmount: collected,
-          note: note.trim() || undefined,
-          clientRequestId: `visit:${visitId}`,
-        }),
-      });
+      if (linked) {
+        const job = await offline.enqueue({
+          kind: "sale",
+          label: `Sale · ${name || "shop"}`,
+          path: "/sales",
+          body: payload,
+          afterId: completeJobId,
+          bindFrom: checkInJobId,
+          bind: "visit",
+        });
+        saleJobId = job.id;
+      } else {
+        try {
+          const sale = await api<Sale>("/sales", {
+            method: "POST",
+            token: accessToken,
+            body: JSON.stringify(payload),
+          });
+          serverSaleId = sale.id;
+        } catch (err) {
+          if (!isOfflineError(err)) throw err;
+          const job = await offline.enqueue({
+            kind: "sale",
+            label: `Sale · ${name || "shop"}`,
+            path: "/sales",
+            body: payload,
+          });
+          saleJobId = job.id;
+        }
+      }
 
       const camera = await ImagePicker.requestCameraPermissionsAsync();
       if (camera.granted) {
         const shot = await ImagePicker.launchCameraAsync({ quality: 0.55, allowsEditing: false });
-        if (!shot.canceled && shot.assets[0]) {
-          await apiUpload<Sale>(`/sales/${sale.id}/bill`, {
-            token: accessToken,
-            fileUri: shot.assets[0].uri,
-          });
+        if (!shot.canceled && shot.assets[0] && (serverSaleId || saleJobId)) {
+          await saveBill(shot.assets[0].uri, serverSaleId, saleJobId);
         }
+      }
+      if (saleJobId) {
+        void offline.flush();
+        Alert.alert("Saved on this phone", "The sale and bill photo will send when the network is back.");
       }
       router.replace("/visits");
     } catch (err) {
-      if (isOfflineError(err)) {
-        await offline.enqueue({
-          kind: "sale",
-          label: `Sale · ${name || "shop"}`,
-          path: "/sales",
-          body: {
-            visitId: Number(visitId),
-            amount: value,
-            collectionAmount: collected,
-            note: note.trim() || undefined,
-            clientRequestId: `visit:${visitId}`,
-          },
-        });
-        Alert.alert("Saved on this phone", "The sale will send when you are back on Wi-Fi.");
-        router.replace("/visits");
-        return;
-      }
       Alert.alert("Could not save sale", err instanceof Error ? err.message : "Try again.");
     } finally {
       setBusy(false);
@@ -92,7 +135,7 @@ export default function RecordSaleScreen() {
       />
       <Field label="Note" value={note} onChangeText={setNote} multiline placeholder="Optional note" />
       <Button title="Save sale" tone="green" onPress={save} loading={busy} />
-      <Text style={styles.hint}>After save you can shoot the bill. Skip the camera if there is no bill.</Text>
+      <Text style={styles.hint}>Bill photo is optional. If there is no network, the sale and photo stay on this phone and send later.</Text>
     </Screen>
   );
 }

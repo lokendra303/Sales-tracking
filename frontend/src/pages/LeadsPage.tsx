@@ -10,6 +10,8 @@ type Lead = {
   name: string;
   phone: string;
   status: string;
+  approvalStatus?: string;
+  createdByName?: string | null;
   assigneeId: number | null;
   assigneeName: string | null;
   address: string | null;
@@ -43,6 +45,7 @@ export function LeadsPage() {
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [assigneeId, setAssigneeId] = useState("");
   const exec = execFromQuery(searchParams.get("assigneeId"));
+  const pendingOnly = searchParams.get("approval") === "pending";
 
   function setExec(next: ExecValue) {
     const nextParams = new URLSearchParams(searchParams);
@@ -55,13 +58,14 @@ export function LeadsPage() {
     if (!accessToken) return;
     const assignee =
       exec === "all" ? "" : exec === "unassigned" ? "&assigneeId=unassigned" : `&assigneeId=${exec}`;
-    const data = await api<{ leads: Lead[] }>(`/leads?q=${encodeURIComponent(q)}${assignee}`, { token: accessToken });
+    const queue = pendingOnly ? "&filter=pending" : "";
+    const data = await api<{ leads: Lead[] }>(`/leads?q=${encodeURIComponent(q)}${assignee}${queue}`, { token: accessToken });
     setLeads(data.leads);
   }
 
   useEffect(() => {
     load().catch(() => undefined);
-  }, [accessToken, q, exec]);
+  }, [accessToken, q, exec, pendingOnly]);
 
   function resetForm() {
     setName("");
@@ -138,6 +142,23 @@ export function LeadsPage() {
     }
   }
 
+  async function decide(leadId: number, decision: "APPROVED" | "REJECTED") {
+    if (!accessToken) return;
+    setNotice("");
+    setError("");
+    try {
+      await api(`/leads/${leadId}/approval`, {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ decision }),
+      });
+      setNotice(decision === "APPROVED" ? "Lead approved. The executive can visit it." : "Lead rejected.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update approval.");
+    }
+  }
+
   async function assign(leadId: number, userId: number) {
     if (!accessToken) return;
     setNotice("");
@@ -185,6 +206,18 @@ export function LeadsPage() {
         <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or phone" />
         <button className="btn green" type="button" onClick={() => setAdding((open) => !open)}>
           {adding ? "Close form" : "Add lead"}
+        </button>
+        <button
+          className="btn blue"
+          type="button"
+          onClick={() => {
+            const nextParams = new URLSearchParams(searchParams);
+            if (pendingOnly) nextParams.delete("approval");
+            else nextParams.set("approval", "pending");
+            setSearchParams(nextParams, { replace: true });
+          }}
+        >
+          {pendingOnly ? "Show all leads" : "Needs approval"}
         </button>
         <label className="btn blue file">
           {busy ? "Working…" : "Import Excel"}
@@ -276,11 +309,28 @@ export function LeadsPage() {
                 </strong>
                 <div className="muted">
                   {lead.phone} · {place || "No address"} · {lead.assigneeName || "Unassigned"}
+                  {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}
                   {hasPin ? " · Map pin" : ""}
                 </div>
               </div>
               <div className="right">
-                <span className="muted">{lead.status}</span>
+                <span className="muted">
+                  {lead.approvalStatus === "PENDING"
+                    ? "Needs approval"
+                    : lead.approvalStatus === "REJECTED"
+                      ? "Rejected"
+                      : lead.status}
+                </span>
+                {lead.approvalStatus === "PENDING" ? (
+                  <>
+                    <button className="btn green" type="button" onClick={() => decide(lead.id, "APPROVED")}>
+                      Approve
+                    </button>
+                    <button className="btn red" type="button" onClick={() => decide(lead.id, "REJECTED")}>
+                      Reject
+                    </button>
+                  </>
+                ) : null}
                 <select
                   value={lead.assigneeId ?? ""}
                   onChange={(event) => {
