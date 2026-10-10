@@ -44,6 +44,8 @@ model Tenant {
   locationLogs      LocationLog[]
   sales             Sale[]
   monthlyTargets    MonthlyTarget[]
+
+  @@map("tenant")
 }
 
 model TenantSettings {
@@ -65,6 +67,8 @@ model TenantSettings {
   updatedAt                        DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenantsettings")
 }
 
 model Role {
@@ -78,6 +82,7 @@ model Role {
   userRoles UserRole[]
 
   @@unique([tenantId, code])
+  @@map("role")
 }
 
 model User {
@@ -110,6 +115,7 @@ model User {
   monthlyTargets    MonthlyTarget[]
 
   @@unique([tenantId, phone])
+  @@map("user")
 }
 
 model UserRole {
@@ -120,6 +126,7 @@ model UserRole {
   role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
+  @@map("userrole")
 }
 
 model Team {
@@ -131,6 +138,8 @@ model Team {
 
   tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   members TeamMember[]
+
+  @@map("team")
 }
 
 model TeamMember {
@@ -141,6 +150,7 @@ model TeamMember {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([teamId, userId])
+  @@map("teammember")
 }
 
 model Device {
@@ -158,6 +168,7 @@ model Device {
   refreshTokens RefreshToken[]
 
   @@unique([userId, deviceUid])
+  @@map("device")
 }
 
 model RefreshToken {
@@ -171,6 +182,8 @@ model RefreshToken {
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@map("refreshtoken")
 }
 
 enum LeadStatus {
@@ -247,6 +260,7 @@ model Lead {
   @@index([tenantId, phone])
   @@index([tenantId, assigneeId, status])
   @@index([tenantId, approvalStatus])
+  @@map("lead")
 }
 
 model Customer {
@@ -275,6 +289,7 @@ model Customer {
   sales     Sale[]
 
   @@unique([tenantId, phone])
+  @@map("customer")
 }
 
 model FollowUp {
@@ -298,6 +313,7 @@ model FollowUp {
 
   @@unique([tenantId, clientRequestId])
   @@index([tenantId, userId, dueAt])
+  @@map("followup")
 }
 
 enum VisitStatus {
@@ -328,6 +344,7 @@ model BeatStop {
   visits   Visit[]
 
   @@index([tenantId, userId, plannedAt])
+  @@map("beatstop")
 }
 
 model Visit {
@@ -367,6 +384,7 @@ model Visit {
   sales    Sale[]
 
   @@index([tenantId, userId, checkedInAt])
+  @@map("visit")
 }
 
 model Sale {
@@ -392,6 +410,7 @@ model Sale {
 
   @@unique([tenantId, clientRequestId])
   @@index([tenantId, userId, createdAt])
+  @@map("sale")
 }
 
 model MonthlyTarget {
@@ -409,6 +428,7 @@ model MonthlyTarget {
 
   @@unique([tenantId, userId, year, month])
   @@index([tenantId, year, month])
+  @@map("monthlytarget")
 }
 
 enum LocationSessionStatus {
@@ -443,6 +463,7 @@ model LocationSession {
   logs   LocationLog[]
 
   @@index([tenantId, userId, status])
+  @@map("locationsession")
 }
 
 model LocationLog {
@@ -466,4 +487,5 @@ model LocationLog {
 
   @@index([sessionId, capturedAt])
   @@index([tenantId, userId, receivedAt])
+  @@map("locationlog")
 }
