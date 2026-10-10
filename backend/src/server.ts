@@ -4,8 +4,8 @@ import { prisma } from "./lib/prisma.js";
 
 const app = createApp();
 
-const server = app.listen(env.port, "0.0.0.0", () => {
-  console.log(`SalesTrack API listening on http://0.0.0.0:${env.port}`);
+const server = app.listen(env.port, env.host, () => {
+  console.log(`SalesTrack API listening on http://${env.host}:${env.port}`);
 });
 
 async function shutdown() {

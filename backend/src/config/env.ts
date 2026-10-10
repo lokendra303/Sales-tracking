@@ -14,6 +14,7 @@ function required(name: string, fallback?: string): string {
 }
 
 export const env = {
+  host: process.env.HOST ?? "localhost",
   port: Number(process.env.PORT ?? 3000),
   nodeEnv: process.env.NODE_ENV ?? "development",
   databaseUrl: databaseUrl(),

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Redirect, router } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Field, PasswordField, Screen } from "@/components/ui";
+import { isOfflineError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { colors, typo } from "@/lib/theme";
 
@@ -10,6 +11,7 @@ export default function LoginScreen() {
   const { user, login } = useAuth();
   const [phone, setPhone] = useState("8888888888");
   const [password, setPassword] = useState("Admin@123");
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -21,10 +23,16 @@ export default function LoginScreen() {
     setError("");
     setLoading(true);
     try {
-      await login(phone.trim(), password);
+      await login(phone.trim(), password, remember);
       router.replace("/(tabs)");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not log in.");
+      setError(
+        isOfflineError(err)
+          ? "Cannot reach the server. Put this phone on the same Wi-Fi as the computer running the API."
+          : err instanceof Error
+            ? err.message
+            : "Could not log in.",
+      );
     } finally {
       setLoading(false);
     }
@@ -50,6 +58,18 @@ export default function LoginScreen() {
           autoComplete="tel"
         />
         <PasswordField label="Password" value={password} onChangeText={setPassword} />
+        <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: remember }}
+          onPress={() => setRemember((value) => !value)}
+          style={styles.remember}
+        >
+          <Ionicons name={remember ? "checkbox" : "square-outline"} size={22} color={colors.blue} />
+          <View style={styles.rememberCopy}>
+            <Text style={styles.rememberTitle}>Save on this phone</Text>
+            <Text style={styles.rememberHint}>Next open stays signed in, including when there is no internet.</Text>
+          </View>
+        </Pressable>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Button title="Log in" onPress={onSubmit} loading={loading} />
         <Text style={styles.help}>Forgot password? Contact admin.</Text>
@@ -72,5 +92,9 @@ const styles = StyleSheet.create({
   sub: { ...typo.muted, fontSize: 15 },
   card: { gap: 14, paddingTop: 12 },
   error: { color: colors.red, textAlign: "center", fontWeight: "700" },
+  remember: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  rememberCopy: { flex: 1, gap: 2 },
+  rememberTitle: { color: colors.text, fontWeight: "700", fontSize: 15 },
+  rememberHint: { ...typo.muted },
   help: { ...typo.muted, textAlign: "center" },
 });

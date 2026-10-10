@@ -1,20 +1,12 @@
-import { Platform } from "react-native";
-import Constants from "expo-constants";
 import { persistGet, persistSet } from "./persist";
 import { getItem, removeItem, setItem } from "./storage";
 
 function defaultBase() {
-  // Mobile is UI only. Point EXPO_PUBLIC_API_URL at this PC or the live server.
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
+  const fromEnv = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/$/, "");
+  if (!fromEnv) {
+    throw new Error("Set EXPO_PUBLIC_API_URL in mobile/.env");
   }
-  if (Platform.OS === "web") {
-    return "http://localhost:3000";
-  }
-  if (Platform.OS === "android" && !Constants.isDevice) {
-    return "http://10.0.2.2:3000";
-  }
-  return "http://192.168.1.83:3000";
+  return fromEnv;
 }
 
 export const API_BASE = defaultBase();
@@ -298,7 +290,7 @@ type ApiResponse<T> =
   | { success: false; error: { code: string; message: string; extra?: unknown } };
 
 const tokenListeners = new Set<(access: string | null) => void>();
-let refreshInFlight: Promise<string | null> | null = null;
+let refreshInFlight: Promise<{ access: string | null; unreachable: boolean }> | null = null;
 
 export function onAccessTokenChange(fn: (access: string | null) => void) {
   tokenListeners.add(fn);
@@ -323,11 +315,15 @@ async function readJson<T>(response: Response): Promise<ApiResponse<T>> {
   }
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+export function isSessionRejected(err: unknown) {
+  return err instanceof ApiError && isAuthLost(err.code, err.message);
+}
+
+async function refreshAccessToken(): Promise<{ access: string | null; unreachable: boolean }> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     const refreshToken = await getItem("refreshToken");
-    if (!refreshToken) return null;
+    if (!refreshToken) return { access: null, unreachable: false };
     try {
       const response = await fetchJson("/auth/refresh", {
         method: "POST",
@@ -335,13 +331,13 @@ async function refreshAccessToken(): Promise<string | null> {
         body: JSON.stringify({ refreshToken }),
       });
       const json = await readJson<{ accessToken: string; refreshToken: string }>(response);
-      if (!json.success) return null;
+      if (!json.success) return { access: null, unreachable: false };
       await setItem("accessToken", json.data.accessToken);
       await setItem("refreshToken", json.data.refreshToken);
       tokenListeners.forEach((fn) => fn(json.data.accessToken));
-      return json.data.accessToken;
-    } catch {
-      return null;
+      return { access: json.data.accessToken, unreachable: false };
+    } catch (err) {
+      return { access: null, unreachable: isOfflineError(err) };
     }
   })().finally(() => {
     refreshInFlight = null;
@@ -375,11 +371,11 @@ export async function api<T>(
     if (!json.success) {
       if (!options.retried && !skipRefresh(path) && isAuthLost(json.error.code, json.error.message)) {
         const next = await refreshAccessToken();
-        if (next) {
+        if (next.access) {
           const { retried: _retried, ...rest } = options;
-          return api<T>(path, { ...rest, token: next, retried: true });
+          return api<T>(path, { ...rest, token: next.access, retried: true });
         }
-        await clearSession();
+        if (!next.unreachable) await clearSession();
       }
       throw new ApiError(json.error.code, json.error.message, json.error.extra);
     }
