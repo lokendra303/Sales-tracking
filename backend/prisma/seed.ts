@@ -1,9 +1,6 @@
 import { PrismaClient, RoleCode } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import dotenv from "dotenv";
-import path from "node:path";
-
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+import "../src/config/database.js";
 
 const prisma = new PrismaClient();
 const password = process.env.SEED_PASSWORD ?? "Admin@123";

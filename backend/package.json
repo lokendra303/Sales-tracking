@@ -6,9 +6,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push",
+    "db:generate": "tsx scripts/with-database.ts generate",
+    "db:migrate": "tsx scripts/with-database.ts migrate dev",
+    "db:push": "tsx scripts/with-database.ts db push",
     "db:seed": "tsx prisma/seed.ts"
   },
   "prisma": {
