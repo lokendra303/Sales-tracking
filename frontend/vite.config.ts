@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
     },
     preview: {
-      host: true,
+      host: env.HOST || "127.0.0.1",
       port,
       strictPort: true,
     },

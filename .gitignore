@@ -3,6 +3,7 @@ salestrack.sql
 dist
 .env
 *.log
+logs/
 .DS_Store
 backend/uploads
 frontend/dist
