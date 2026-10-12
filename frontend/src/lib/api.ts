@@ -1,5 +1,6 @@
 function apiBase() {
-  const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "http://localhost:3000";
+  const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
+  if (!fromEnv) throw new Error("Set VITE_API_URL in frontend/.env");
   if (typeof window === "undefined") return fromEnv;
   const pageHost = window.location.hostname;
   if (!pageHost || pageHost === "localhost" || pageHost === "127.0.0.1") return fromEnv;
@@ -8,7 +9,8 @@ function apiBase() {
     const apiIsLocal = api.hostname === "localhost" || api.hostname === "127.0.0.1";
     if (!apiIsLocal) return fromEnv;
     const port = api.port ? `:${api.port}` : "";
-    return `${api.protocol}//${pageHost}${port}`;
+    const path = api.pathname.replace(/\/$/, "");
+    return `${api.protocol}//${pageHost}${port}${path}`;
   } catch {
     return fromEnv;
   }

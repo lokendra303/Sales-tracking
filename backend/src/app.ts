@@ -26,22 +26,23 @@ export function createApp() {
   app.use(cors());
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/health", (_req, res) => {
+  const api = express.Router();
+  api.get("/health", (_req, res) => {
     res.json({ success: true, data: { ok: true, service: "salestrack-api" } });
   });
-
-  app.use("/auth", authRouter);
-  app.use("/users", usersRouter);
-  app.use("/teams", teamsRouter);
-  app.use("/devices", devicesRouter);
-  app.use("/settings", settingsRouter);
-  app.use("/registrations", registrationsRouter);
-  app.use(crmRouter);
-  app.use(beatRouter);
-  app.use(visitsRouter);
-  app.use(fieldRouter);
-  app.use(salesRouter);
-  app.use(reportsRouter);
+  api.use("/auth", authRouter);
+  api.use("/users", usersRouter);
+  api.use("/teams", teamsRouter);
+  api.use("/devices", devicesRouter);
+  api.use("/settings", settingsRouter);
+  api.use("/registrations", registrationsRouter);
+  api.use(crmRouter);
+  api.use(beatRouter);
+  api.use(visitsRouter);
+  api.use(fieldRouter);
+  api.use(salesRouter);
+  api.use(reportsRouter);
+  app.use("/api", api);
 
   app.use(errorHandler);
   return app;
