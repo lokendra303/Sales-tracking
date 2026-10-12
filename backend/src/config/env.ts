@@ -22,5 +22,7 @@ export const env = {
   jwtRefreshSecret: required("JWT_REFRESH_SECRET", "dev-refresh-secret-change-me"),
   accessTtl: process.env.JWT_ACCESS_TTL ?? "15m",
   refreshTtlDays: Number(process.env.JWT_REFRESH_DAYS ?? 30),
-  seedPassword: process.env.SEED_PASSWORD ?? "Admin@123",
+  adminName: process.env.ADMIN_NAME?.trim() ?? "",
+  adminPhone: (process.env.ADMIN_PHONE ?? "").replace(/\D/g, ""),
+  adminPassword: process.env.ADMIN_PASSWORD ?? "",
 };

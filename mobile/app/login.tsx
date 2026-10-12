@@ -9,8 +9,8 @@ import { colors, typo } from "@/lib/theme";
 
 export default function LoginScreen() {
   const { user, login } = useAuth();
-  const [phone, setPhone] = useState("8888888888");
-  const [password, setPassword] = useState("Admin@123");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);

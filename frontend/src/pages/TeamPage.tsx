@@ -12,7 +12,7 @@ export function TeamPage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("Admin@123");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [issued, setIssued] = useState("");
 

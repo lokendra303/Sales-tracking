@@ -3,10 +3,21 @@ import bcrypt from "bcryptjs";
 import "../src/config/database.js";
 
 const prisma = new PrismaClient();
-const password = process.env.SEED_PASSWORD ?? "Admin@123";
+
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing ${name} in backend/.env`);
+  return value;
+}
+
+const adminName = requiredEnv("ADMIN_NAME");
+const adminPhone = requiredEnv("ADMIN_PHONE").replace(/\D/g, "");
+const adminPassword = requiredEnv("ADMIN_PASSWORD");
+const demoPassword = requiredEnv("SEED_PASSWORD");
 
 async function main() {
-  const passwordHash = await bcrypt.hash(password, 10);
+  const demoPasswordHash = await bcrypt.hash(demoPassword, 10);
+  const adminPasswordHash = await bcrypt.hash(adminPassword, 10);
 
   const tenant = await prisma.tenant.upsert({
     where: { slug: "demo-company" },
@@ -51,25 +62,26 @@ async function main() {
     }));
 
   const people = [
-    { name: "Admin User", phone: "9999999999", role: "ADMIN" as RoleCode },
-    { name: "Manager User", phone: "7777777777", role: "MANAGER" as RoleCode },
-    { name: "Rahul Kumar", phone: "8888888888", role: "SALES_EXECUTIVE" as RoleCode },
-    { name: "Priya Sharma", phone: "6666666666", role: "SALES_EXECUTIVE" as RoleCode },
+    { name: adminName, phone: adminPhone, role: "ADMIN" as RoleCode, passwordHash: adminPasswordHash },
+    { name: "Manager User", phone: "7777777777", role: "MANAGER" as RoleCode, passwordHash: demoPasswordHash },
+    { name: "Rahul Kumar", phone: "8888888888", role: "SALES_EXECUTIVE" as RoleCode, passwordHash: demoPasswordHash },
+    { name: "Priya Sharma", phone: "6666666666", role: "SALES_EXECUTIVE" as RoleCode, passwordHash: demoPasswordHash },
   ];
 
   for (const person of people) {
     const role = roles.find((item) => item.code === person.role);
     if (!role) continue;
+    const isAdmin = person.role === "ADMIN";
 
     const user = await prisma.user.upsert({
       where: { tenantId_phone: { tenantId: tenant.id, phone: person.phone } },
-      update: { name: person.name, passwordHash, platformAdmin: person.role === "ADMIN" },
+      update: isAdmin ? { platformAdmin: true } : { name: person.name, passwordHash: person.passwordHash, platformAdmin: false },
       create: {
         tenantId: tenant.id,
         name: person.name,
         phone: person.phone,
-        passwordHash,
-        platformAdmin: person.role === "ADMIN",
+        passwordHash: person.passwordHash,
+        platformAdmin: isAdmin,
       },
     });
 
@@ -277,10 +289,10 @@ async function main() {
   }
 
   console.log("Seeded Demo Company");
-  console.log("Admin     9999999999 /", password);
-  console.log("Manager   7777777777 /", password);
-  console.log("Sales     8888888888 /", password, "(Rahul)");
-  console.log("Sales     6666666666 /", password, "(Priya)");
+  console.log("Admin phone", adminPhone, "(password is ADMIN_PASSWORD in backend/.env)");
+  console.log("Manager   7777777777");
+  console.log("Sales     8888888888 (Rahul)");
+  console.log("Sales     6666666666 (Priya)");
   console.log("Live location: Off");
 }
 

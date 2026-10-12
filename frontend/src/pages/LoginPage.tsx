@@ -6,8 +6,8 @@ import { useAuth } from "../lib/auth";
 export function LoginPage({ blocked = false }: { blocked?: boolean }) {
   const { login, logout, user } = useAuth();
   const navigate = useNavigate();
-  const [phone, setPhone] = useState("7777777777");
-  const [password, setPassword] = useState("Admin@123");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState(blocked ? "Sales executives use the SalesTrack mobile app." : "");
   const [loading, setLoading] = useState(false);
 
@@ -69,7 +69,6 @@ export function LoginPage({ blocked = false }: { blocked?: boolean }) {
               <p className="muted small">
                 New company? <Link to="/register">Register as manager</Link>
               </p>
-              <p className="muted small">Admin 9999999999 · Manager 7777777777 · password Admin@123</p>
             </>
           )}
         </form>

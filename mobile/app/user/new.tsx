@@ -12,7 +12,7 @@ export default function NewUserScreen() {
   const admin = isAdmin(user?.roles);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("Admin@123");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function save() {
