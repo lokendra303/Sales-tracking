@@ -156,10 +156,22 @@ export function listenReminderTaps(onOpen: (leadId: number | null) => void) {
   const Notifications = loadNotifications();
   if (!Notifications) return () => undefined;
   try {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    let lastHandled = "";
+    const handle = (response: import("expo-notifications").NotificationResponse | null) => {
+      if (!response) return;
+      const key = `${response.notification.request.identifier}:${response.notification.date}`;
+      if (key === lastHandled) return;
+      lastHandled = key;
       const leadId = Number(response.notification.request.content.data?.leadId);
       onOpen(Number.isFinite(leadId) && leadId > 0 ? leadId : null);
-    });
+    };
+    const sub = Notifications.addNotificationResponseReceivedListener(handle);
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        handle(response);
+        return Notifications.clearLastNotificationResponseAsync();
+      })
+      .catch(() => undefined);
     return () => sub.remove();
   } catch {
     return () => undefined;

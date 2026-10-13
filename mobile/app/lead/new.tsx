@@ -2,7 +2,7 @@ import { useState } from "react";
 import { router } from "expo-router";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
-import { loadLocation } from "@/lib/device-location";
+import { bestFix, loadLocation } from "@/lib/device-location";
 import { Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { ApiError, api, isOfflineError } from "@/lib/api";
@@ -39,8 +39,11 @@ export default function NewLeadScreen() {
         Alert.alert("Location needed", "Allow location so the executive can follow the map to this shop.");
         return;
       }
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setPin({ lat: position.coords.latitude, lng: position.coords.longitude });
+      const fix = await bestFix(Location);
+      setPin({ lat: fix.lat, lng: fix.lng });
+      if ((fix.accuracy ?? 0) > 50) {
+        Alert.alert("Weak GPS", `This pin may be off by about ${Math.round(fix.accuracy!)} m. Step outside the shop and pin again.`);
+      }
     } catch (err) {
       Alert.alert("Could not pin", err instanceof Error ? err.message : "Try again at the shop.");
     } finally {

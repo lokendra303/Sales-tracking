@@ -336,6 +336,7 @@ export async function updateLead(
   id: number,
   data: {
     name?: string;
+    phone?: string;
     contactPerson?: string;
     businessType?: string;
     address?: string;
@@ -343,7 +344,7 @@ export async function updateLead(
     latitude?: number | null;
     longitude?: number | null;
     notes?: string;
-    potential?: number;
+    potential?: number | null;
     temperature?: Temperature;
     status?: LeadStatus;
   },
@@ -352,22 +353,20 @@ export async function updateLead(
   if (data.status && current.approvalStatus !== "APPROVED") {
     requireApproved(current);
   }
-  let latitude = data.latitude;
-  let longitude = data.longitude;
-  const nextAddress = data.address ?? current.address;
-  const nextCity = data.city ?? current.city;
-  if (
-    (latitude == null || longitude == null) &&
-    (data.address !== undefined || data.city !== undefined) &&
-    (nextAddress || nextCity)
-  ) {
-    const found = await geocodeAddress([nextAddress, nextCity].filter(Boolean).join(", "));
-    latitude = found?.lat ?? latitude;
-    longitude = found?.lng ?? longitude;
+  if ((data.latitude !== undefined || data.longitude !== undefined) && !isManager(roles)) {
+    throw forbidden("Only a manager can correct the shop location.");
+  }
+  if (data.phone !== undefined && data.phone !== current.phone) {
+    if (!isManager(roles)) throw forbidden("Only a manager can change the phone number.");
+    const taken = await prisma.lead.findFirst({ where: { tenantId, phone: data.phone, id: { not: id } } });
+    if (taken) throw conflict(`Another lead already uses this phone: ${taken.name}.`);
+  }
+  if ((data.latitude == null) !== (data.longitude == null)) {
+    throw badRequest("Set both latitude and longitude for the shop pin.");
   }
   const lead = await prisma.lead.update({
     where: { id },
-    data: { ...data, latitude, longitude },
+    data,
     include: leadInclude,
   });
   return publicLead(lead);

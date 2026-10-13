@@ -170,6 +170,13 @@ export async function logout(refreshToken?: string) {
   if (!refreshToken) {
     return;
   }
+  const stored = await prisma.refreshToken.findFirst({
+    where: { tokenHash: hashToken(refreshToken) },
+    select: { deviceId: true },
+  });
+  if (stored?.deviceId) {
+    await prisma.device.update({ where: { id: stored.deviceId }, data: { pushToken: null } }).catch(() => undefined);
+  }
   await prisma.refreshToken.updateMany({
     where: { tokenHash: hashToken(refreshToken), revokedAt: null },
     data: { revokedAt: new Date() },
@@ -188,6 +195,10 @@ export async function me(userId: number) {
 }
 
 export async function savePushToken(userId: number, token: string, deviceUid = "salestrack-dev") {
+  await prisma.device.updateMany({
+    where: { pushToken: token, userId: { not: userId } },
+    data: { pushToken: null },
+  });
   await prisma.device.upsert({
     where: { userId_deviceUid: { userId, deviceUid } },
     create: {

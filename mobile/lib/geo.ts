@@ -1,3 +1,5 @@
+export const FINISH_RADIUS_METERS = 300;
+
 export function haversineMeters(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },

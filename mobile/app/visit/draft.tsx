@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Image, StyleSheet, Text } from "react-native"
 import { LiveCamera } from "@/components/live-camera";
 import { loadLocation } from "@/lib/device-location";
 import { Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
+import { assertNearShop, finishReading } from "@/lib/finish-visit";
 import { getLocalVisit, saveLocalVisit, type LocalVisit } from "@/lib/local-visits";
 import { useOffline } from "@/lib/offline";
 import { keepPhoto } from "@/lib/photos";
@@ -88,13 +89,15 @@ export default function DraftVisitScreen() {
     }
     setBusy(true);
     try {
+      const point = await finishReading();
+      assertNearShop(point, { lat: visit.placeLat, lng: visit.placeLng });
       const checkedOutAt = new Date().toISOString();
       const afterId = outcome === "SUCCESS" && visit.photoJobId ? visit.photoJobId : visit.checkInJobId;
       const job = await offline.enqueue({
         kind: "visit-complete",
         label: `Complete visit · ${visit.name}`,
         path: "/visits/{visitId}/complete",
-        body: { outcome, notes: notes || undefined, checkedOutAt },
+        body: { outcome, notes: notes || undefined, checkedOutAt, ...point },
         afterId,
         bindFrom: visit.checkInJobId,
         bind: "visit",
@@ -116,6 +119,8 @@ export default function DraftVisitScreen() {
       }
       Alert.alert("Saved on this phone", "This visit will sync when the network is back.");
       router.replace("/visits");
+    } catch (err) {
+      Alert.alert("Could not complete", err instanceof Error ? err.message : "Try again at the shop.");
     } finally {
       setBusy(false);
     }
@@ -148,7 +153,7 @@ export default function DraftVisitScreen() {
           {visit.distanceMeters != null ? `${visit.distanceMeters} m from shop pin` : "GPS saved"}
           {visit.verified ? " · Inside check-in area" : ""}
         </Text>
-        <Text style={styles.ok}>Photo and GPS upload automatically when the network is back.</Text>
+        <Text style={styles.ok}>Finish this visit within 300 m of the shop pin. Photo and GPS upload when the network is back.</Text>
       </Card>
 
       <Button
@@ -181,7 +186,7 @@ export default function DraftVisitScreen() {
           <Field label="Visit note" value={notes} onChangeText={setNotes} multiline placeholder="What happened" />
           <Button title="Complete visit" tone="green" onPress={() => complete("SUCCESS")} disabled={busy} />
           <Button title="Customer not there" tone="ghost" onPress={() => complete("UNAVAILABLE")} disabled={busy} />
-          <Text style={styles.hint}>Not there = no photo. Success needs the live place photo. Nothing is lost if the network is down.</Text>
+          <Text style={styles.hint}>Not there = no photo. Success needs the live place photo. Finish within 300 m of the shop pin.</Text>
         </>
       ) : (
         <Text style={styles.ok}>Waiting to sync.</Text>

@@ -17,6 +17,7 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 2000,
       time: true,
+      env: { TZ: "Asia/Kolkata" },
       error_file: path.join(root, "logs", "salestrack-api-error.log"),
       out_file: path.join(root, "logs", "salestrack-api-out.log"),
     },

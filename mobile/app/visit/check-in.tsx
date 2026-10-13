@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { Alert, StyleSheet, Text } from "react-native";
 import { Button, Card, Screen, ScreenHeader } from "@/components/ui";
-import { loadLocation } from "@/lib/device-location";
+import { bestFix, loadLocation } from "@/lib/device-location";
 import { useAuth } from "@/lib/auth";
 import { api, isOfflineError, type BeatToday, type CheckPreview, type Visit } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
@@ -34,20 +34,15 @@ export default function CheckInScreen() {
     try {
       const Location = await loadLocation();
       if (!Location) {
-        setError("Turn on location so we can check you are at the shop.");
+        setError("Turn on location so we can save where this visit started.");
         return;
       }
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
-        setError("Turn on location so we can check you are at the shop.");
+        setError("Turn on location so we can save where this visit started.");
         return;
       }
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const point = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy ?? undefined,
-      };
+      const point = await bestFix(Location, 6000);
       setCoords(point);
       try {
         setPreview(
@@ -70,7 +65,7 @@ export default function CheckInScreen() {
           stop?.placeLat != null && stop.placeLng != null
             ? haversineMeters(point, { lat: stop.placeLat, lng: stop.placeLng })
             : null;
-        const radius = beat?.radiusMeters ?? 100;
+        const radius = 300;
         setPreview({
           name: stop?.name ?? "Shop check",
           phone: stop?.phone ?? null,
@@ -85,7 +80,7 @@ export default function CheckInScreen() {
           radiusMeters: radius,
           withinRadius: distance != null ? distance <= radius : false,
           hasPin: stop?.placeLat != null,
-          allowUnverified: distance == null,
+          allowUnverified: true,
         });
       }
     } catch (err) {
@@ -154,13 +149,13 @@ export default function CheckInScreen() {
         void offline.flush();
         return;
       }
-      Alert.alert("Cannot start visit", err instanceof Error ? err.message : "Try again at the shop.");
+      Alert.alert("Cannot start visit", err instanceof Error ? err.message : "Try again.");
     } finally {
       setLoading(false);
     }
   }
 
-  const canStart = Boolean(coords && preview && (preview.withinRadius || preview.allowUnverified));
+  const canStart = Boolean(coords);
 
   return (
     <Screen header={<ScreenHeader title="Check-in" back align="center" fallback="/visits" />}>
@@ -168,16 +163,16 @@ export default function CheckInScreen() {
         <Text style={styles.pin}>📍</Text>
         <Text style={styles.name}>{preview?.name ?? "Shop check"}</Text>
         <Text style={[typo.muted, { textAlign: "center" }]}>
-          {[preview?.address, preview?.city].filter(Boolean).join(", ") || "We will measure GPS against the shop pin."}
+          {[preview?.address, preview?.city].filter(Boolean).join(", ") || "Start from anywhere. Finish within 300 m of the shop pin."}
         </Text>
         {preview?.distanceMeters != null ? (
-          <Text style={preview.withinRadius ? styles.ok : styles.warn}>
-            {preview.distanceMeters} m from shop · need {preview.radiusMeters} m
+          <Text style={styles.ok}>
+            {preview.distanceMeters} m from the shop pin. You can start now. Finish the visit within 300 m.
           </Text>
         ) : preview && !preview.hasPin ? (
-          <Text style={styles.warn}>This stop has no map pin yet.</Text>
+          <Text style={styles.warn}>No shop pin yet. You can start. Ask the manager to correct the location before you finish.</Text>
         ) : (
-          <Text style={typo.muted}>Tap Check location to read your phone GPS.</Text>
+          <Text style={typo.muted}>Tap Check location, then start the visit.</Text>
         )}
         {error ? <Text style={styles.warn}>{error}</Text> : null}
       </Card>
@@ -190,7 +185,7 @@ export default function CheckInScreen() {
         />
       ) : null}
       <Button title="Start visit" tone="green" onPress={startVisit} disabled={!canStart || loading} />
-      <Text style={styles.hint}>No network is fine. GPS and the live photo stay on this phone and send automatically.</Text>
+      <Text style={styles.hint}>Start from anywhere. To finish, be within 300 m of the shop pin the manager saved.</Text>
     </Screen>
   );
 }

@@ -36,6 +36,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Firebase service account key (upload to EAS, never commit)
+*firebase-adminsdk*.json
+service-account*.json
+
 # generated native folders
 /ios
 /android

@@ -144,6 +144,9 @@ visitsRouter.post(
         notes: z.string().optional(),
         collectionAmount: z.number().nonnegative().optional(),
         checkedOutAt: z.string().optional(),
+        lat: z.number().gte(-90).lte(90).optional(),
+        lng: z.number().gte(-180).lte(180).optional(),
+        accuracy: z.number().nonnegative().optional(),
       })
       .parse(req.body);
     const data = await visits.completeVisit({

@@ -1,7 +1,9 @@
-import { StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { AppState, Platform, StyleSheet, Text, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
 import { Avatar, Button, Card, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { askBackgroundPermission, backgroundAllowed } from "@/lib/background-permission";
 import { useOffline } from "@/lib/offline";
 import { accessLabel, isAdmin, isManager, isOffice, isSales, roleLabel } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
@@ -12,6 +14,24 @@ export default function MoreScreen() {
   const offline = useOffline();
   const roles = user?.roles ?? [];
   const office = isOffice(roles);
+  const [background, setBackground] = useState<boolean | null>(null);
+
+  const checkBackground = useCallback(() => {
+    backgroundAllowed().then(setBackground).catch(() => setBackground(null));
+  }, []);
+
+  useFocusEffect(checkBackground);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkBackground();
+    });
+    return () => sub.remove();
+  }, [checkBackground]);
+
+  async function allowBackground() {
+    setBackground(await askBackgroundPermission());
+  }
 
   async function onLogout() {
     await logout();
@@ -51,6 +71,9 @@ export default function MoreScreen() {
           </>
         ) : null}
         {!isAdmin(roles) ? <Row label="Reminders" value="This phone only · no Firebase" /> : null}
+        {Platform.OS === "android" && background !== null ? (
+          <Row label="Run in background" value={background ? "Allowed" : "Not allowed"} />
+        ) : null}
         {isAdmin(roles) ? (
           <>
             <Row label="Manages" value="Managers only" />
@@ -60,6 +83,7 @@ export default function MoreScreen() {
         ) : null}
       </Card>
       {!isAdmin(roles) ? <Button title="Open reminders" onPress={() => router.push("/notifications")} /> : null}
+      {background === false ? <Button title="Allow running in background" onPress={allowBackground} /> : null}
       {offline.pending || !offline.online ? (
         <Button
           title={offline.online ? `Send ${offline.pending} saved items` : "No internet · retry when on Wi-Fi"}

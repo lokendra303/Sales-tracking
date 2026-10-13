@@ -6,6 +6,7 @@ import { loadLocation } from "@/lib/device-location";
 import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, apiUpload, fetchVisitPhoto, isOfflineError, serverReachable, visitPhotoUri, type Visit } from "@/lib/api";
+import { assertNearShop, finishReading } from "@/lib/finish-visit";
 import { useOffline } from "@/lib/offline";
 import { keepPhoto } from "@/lib/photos";
 import { openCall, openNavigate, openWhatsApp, when } from "@/lib/format";
@@ -120,17 +121,44 @@ export default function VisitScreen() {
 
   async function complete(outcome: "SUCCESS" | "UNAVAILABLE") {
     if (!accessToken || !visit) return;
-    if (outcome === "SUCCESS" && !visit.hasPhoto) {
+    const photoSaved = offline.jobs.some((job) => job.kind === "visit-photo" && job.path === `/visits/${visit.id}/photo`);
+    if (outcome === "SUCCESS" && !visit.hasPhoto && !photoSaved) {
       Alert.alert("Place photo required", "Shoot the shop now. A successful visit needs proof.");
       return;
     }
     setBusy(true);
     try {
-      await api(`/visits/${visit.id}/complete`, {
-        method: "POST",
-        token: accessToken,
-        body: JSON.stringify({ outcome, notes: notes || undefined, checkedOutAt: new Date().toISOString() }),
-      });
+      if (photoSaved) await offline.flush();
+      let current = visit;
+      try {
+        current = await api<Visit>(`/visits/${visit.id}`, { token: accessToken });
+        setVisit(current);
+      } catch (err) {
+        if (!isOfflineError(err)) throw err;
+      }
+      const point = await finishReading();
+      assertNearShop(point, { lat: current.placeLat, lng: current.placeLng });
+      const body = { outcome, notes: notes || undefined, checkedOutAt: new Date().toISOString(), ...point };
+      try {
+        await api(`/visits/${visit.id}/complete`, {
+          method: "POST",
+          token: accessToken,
+          body: JSON.stringify(body),
+        });
+      } catch (err) {
+        if (!isOfflineError(err)) throw err;
+        const photoJob = offline.jobs.find((job) => job.kind === "visit-photo" && job.path === `/visits/${visit.id}/photo`);
+        await offline.enqueue({
+          kind: "visit-complete",
+          label: `Complete visit · ${current.name}`,
+          path: `/visits/${visit.id}/complete`,
+          body,
+          afterId: photoJob?.id,
+        });
+        Alert.alert("Saved on this phone", "Visit complete will send when you are back on Wi-Fi.");
+        router.replace("/visits");
+        return;
+      }
       if (outcome === "SUCCESS") {
         router.replace({
           pathname: "/sale/new",
@@ -140,17 +168,6 @@ export default function VisitScreen() {
         router.replace("/visits");
       }
     } catch (err) {
-      if (isOfflineError(err)) {
-        await offline.enqueue({
-          kind: "visit-complete",
-          label: `Complete visit · ${visit.name}`,
-          path: `/visits/${visit.id}/complete`,
-          body: { outcome, notes: notes || undefined, checkedOutAt: new Date().toISOString() },
-        });
-        Alert.alert("Saved on this phone", "Visit complete will send when you are back on Wi-Fi.");
-        router.replace("/visits");
-        return;
-      }
       Alert.alert("Could not complete", err instanceof Error ? err.message : "Try again.");
     } finally {
       setBusy(false);
@@ -183,10 +200,14 @@ export default function VisitScreen() {
         {visit.userName ? <Text style={typo.muted}>{visit.userName}</Text> : null}
         <Text style={typo.muted}>{[visit.address, visit.city].filter(Boolean).join(", ")}</Text>
         <Text style={typo.muted}>Checked in {when(visit.checkedInAt)}</Text>
-        <Text style={visit.verified ? styles.ok : styles.warn}>
-          {visit.distanceMeters != null ? `${visit.distanceMeters} m from shop pin` : "No shop pin"}
-          {visit.verified ? " · Location verified" : " · Location not verified"}
-        </Text>
+        {open ? (
+          <Text style={styles.ok}>Start is saved. Finish this visit within 300 m of the shop pin.</Text>
+        ) : (
+          <Text style={visit.verified ? styles.ok : styles.warn}>
+            {visit.distanceMeters != null ? `${visit.distanceMeters} m from shop pin` : "No shop pin"}
+            {visit.verified ? " · Finished near the shop" : ""}
+          </Text>
+        )}
       </Card>
 
       {visit.phone ? (
@@ -248,7 +269,7 @@ export default function VisitScreen() {
           <Field label="Visit note" value={notes} onChangeText={setNotes} multiline placeholder="What happened" />
           <Button title="Complete visit" tone="green" onPress={() => complete("SUCCESS")} disabled={busy} />
           <Button title="Customer not there" tone="ghost" onPress={() => complete("UNAVAILABLE")} disabled={busy} />
-          <Text style={styles.hint}>Not there = no photo, follow-up tomorrow. Success needs the place photo.</Text>
+          <Text style={styles.hint}>Not there = no photo, follow-up tomorrow. Success needs the place photo. Either way, finish within 300 m of the shop pin.</Text>
         </>
       ) : null}
       {open && manager ? (

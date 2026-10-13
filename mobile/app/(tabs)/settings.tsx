@@ -75,7 +75,7 @@ export default function SettingsScreen() {
             </View>
           </Card>
           <Card>
-            <Row label="Visit check-in radius" value={`${settings.visitCheckinRadiusMeters} m`} />
+            <Row label="Finish a visit" value="Within 300 m of the shop pin" />
             <Row label="Tracking interval" value={`${Math.round(settings.trackingIntervalSeconds / 60)} min`} />
             <Row label="Currency" value={settings.currency} />
             <Row label="Timezone" value={settings.timezone} />

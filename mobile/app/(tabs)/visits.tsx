@@ -4,11 +4,22 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
 import { ActionRow, Badge, Button, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { api, type BeatPlan, type BeatToday, type Visit } from "@/lib/api";
+import { api, type BeatPlan, type BeatStop, type BeatToday, type Visit } from "@/lib/api";
 import { readLocalVisits, type LocalVisit } from "@/lib/local-visits";
+import { useOffline } from "@/lib/offline";
 import { openCall, openNavigate, openWhatsApp, tomorrowDay, when } from "@/lib/format";
 import { isManager } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
+
+function stopBadge(stop: BeatStop, sending: boolean) {
+  if (sending) return { label: "Sending", tone: "amber" as const };
+  if (stop.visitStatus === "IN_PROGRESS") return { label: "In progress", tone: "blue" as const };
+  if (stop.visitStatus === "COMPLETED") {
+    if (stop.visitOutcome === "UNAVAILABLE") return { label: "Missed", tone: "amber" as const };
+    return { label: stop.visitedToday === false ? "Done earlier" : "Done", tone: "green" as const };
+  }
+  return { label: "Pending", tone: "slate" as const };
+}
 
 function execFromParam(raw?: string): ExecValue {
   if (!raw) return "all";
@@ -21,6 +32,7 @@ export default function VisitsScreen() {
   const params = useLocalSearchParams<{ userId?: string }>();
   const manager = isManager(user?.roles);
   const { people } = useExecutives();
+  const offline = useOffline();
   const [beat, setBeat] = useState<BeatToday | null>(null);
   const [tomorrow, setTomorrow] = useState<BeatPlan | null>(null);
   const [proofs, setProofs] = useState<Visit[]>([]);
@@ -32,27 +44,34 @@ export default function VisitsScreen() {
     setExec(execFromParam(params.userId));
   }, [params.userId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      readLocalVisits().then(setDrafts);
-      if (!accessToken) return;
-      if (manager) {
-        const qs = typeof exec === "number" ? `&userId=${exec}` : "";
-        api<Visit[]>(`/visits?days=14${qs}`, { token: accessToken })
-          .then(setProofs)
-          .catch(() => undefined)
-          .finally(() => setLoading(false));
-        return;
-      }
-      api<BeatToday>("/beat/today", { token: accessToken })
-        .then(setBeat)
+  const load = useCallback(() => {
+    readLocalVisits().then(setDrafts);
+    if (!accessToken) return;
+    if (manager) {
+      const qs = typeof exec === "number" ? `&userId=${exec}` : "";
+      api<Visit[]>(`/visits?days=14${qs}`, { token: accessToken })
+        .then(setProofs)
         .catch(() => undefined)
         .finally(() => setLoading(false));
-      api<BeatPlan>(`/beat?date=${tomorrowDay()}`, { token: accessToken })
-        .then(setTomorrow)
-        .catch(() => undefined);
-    }, [accessToken, manager, exec]),
-  );
+      return;
+    }
+    api<BeatToday>("/beat/today", { token: accessToken })
+      .then(setBeat)
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+    api<BeatPlan>(`/beat?date=${tomorrowDay()}`, { token: accessToken })
+      .then(setTomorrow)
+      .catch(() => undefined);
+  }, [accessToken, manager, exec]);
+
+  useFocusEffect(load);
+
+  useEffect(() => {
+    load();
+  }, [offline.pending, load]);
+
+  const sendingVisit = (visitId: number | null) =>
+    visitId != null && offline.jobs.some((job) => job.kind === "visit-complete" && job.path === `/visits/${visitId}/complete`);
 
   if (manager) {
     return (
@@ -117,10 +136,12 @@ export default function VisitsScreen() {
             </Pressable>
           ) : null}
           <Text style={styles.count}>
-            {beat.completedToday} done · {beat.stops.length} stops · {beat.radiusMeters} m check-in
+            {beat.completedToday} done · {beat.stops.length} stops · finish within 300 m
           </Text>
           {beat.stops.map((stop) => {
             const done = stop.visitStatus === "COMPLETED";
+            const sending = sendingVisit(stop.visitId);
+            const badge = stopBadge(stop, sending);
             const params = {
               leadId: stop.leadId ? String(stop.leadId) : undefined,
               customerId: stop.customerId ? String(stop.customerId) : undefined,
@@ -136,11 +157,9 @@ export default function VisitsScreen() {
                     <Text style={styles.name}>{stop.name}</Text>
                     <Text style={typo.muted}>{[stop.address, stop.city].filter(Boolean).join(", ") || "No address"}</Text>
                     <Text style={typo.muted}>{stop.phone}</Text>
+                    {done && stop.visitAt ? <Text style={typo.muted}>Finished {when(stop.visitAt)}</Text> : null}
                   </View>
-                  <Badge
-                    label={done ? (stop.visitOutcome === "UNAVAILABLE" ? "Missed" : "Done") : "Pending"}
-                    tone={done ? (stop.visitOutcome === "UNAVAILABLE" ? "amber" : "green") : "amber"}
-                  />
+                  <Badge label={badge.label} tone={badge.tone} />
                 </View>
                 <ActionRow>
                   {stop.phone ? <Button title="Call" flex onPress={() => openCall(stop.phone!)} /> : null}
@@ -152,9 +171,16 @@ export default function VisitsScreen() {
                     onPress={() => openNavigate(stop.placeLat, stop.placeLng, [stop.address, stop.city].filter(Boolean).join(", "))}
                   />
                 </ActionRow>
-                {done && stop.visitId ? (
+                {sending ? (
+                  <Text style={typo.muted}>Visit finished on this phone. It sends automatically.</Text>
+                ) : stop.visitStatus === "IN_PROGRESS" && stop.visitId ? (
+                  <Button title="Continue visit" tone="green" onPress={() => router.push(`/visit/${stop.visitId}`)} />
+                ) : done && stop.visitId ? (
                   <>
                     <Button title="View visit" tone="green" onPress={() => router.push(`/visit/${stop.visitId}`)} />
+                    {stop.visitedToday === false && !beat.activeVisit ? (
+                      <Button title="Visit again" tone="outline" onPress={() => router.push({ pathname: "/visit/check-in", params })} />
+                    ) : null}
                     {stop.visitOutcome === "SUCCESS" && !stop.saleId ? (
                       <Button
                         title="Record sale"
@@ -171,7 +197,7 @@ export default function VisitsScreen() {
                     ) : null}
                   </>
                 ) : beat.activeVisit || drafts.some((draft) => draft.leadId === stop.leadId || draft.customerId === stop.customerId) ? null : (
-                  <Button title="Check location" tone="green" onPress={() => router.push({ pathname: "/visit/check-in", params })} />
+                  <Button title="Start visit" tone="green" onPress={() => router.push({ pathname: "/visit/check-in", params })} />
                 )}
               </Card>
             );

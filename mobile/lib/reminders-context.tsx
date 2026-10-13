@@ -2,9 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { AppState } from "react-native";
 import { router } from "expo-router";
 import { api, type FollowUp } from "./api";
+import { promptBackgroundOnce } from "./background-permission";
 import { useAuth } from "./auth";
 import { persistGet, persistSet } from "./persist";
-import { registerPushToken, watchAssignedLeads } from "./lead-alerts";
+import { clearOldBackgroundTasks, listenLeadPushes, registerPushToken, watchAssignedLeads } from "./lead-alerts";
 import { cancelAllReminders, listenReminderTaps, syncReminders } from "./reminders";
 import { isAdmin, isSales } from "./roles";
 
@@ -18,6 +19,17 @@ type ReminderState = {
 
 const ReminderContext = createContext<ReminderState | null>(null);
 
+function openFromAlert(leadId: number | null, attempt = 0) {
+  setTimeout(() => {
+    try {
+      if (leadId) router.push(`/lead/${leadId}`);
+      else router.push("/notifications");
+    } catch {
+      if (attempt < 8) openFromAlert(leadId, attempt + 1);
+    }
+  }, attempt === 0 ? 300 : 700);
+}
+
 export function ReminderProvider({ children }: { children: ReactNode }) {
   const { accessToken, user } = useAuth();
   const [enabled, setOn] = useState(true);
@@ -28,10 +40,13 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
     persistGet("remindersEnabled").then((value) => {
       if (value === "0") setOn(false);
     });
-    return listenReminderTaps((leadId) => {
-      if (leadId) router.push(`/lead/${leadId}`);
-      else router.push("/notifications");
-    });
+    void clearOldBackgroundTasks();
+    const removeTaps = listenReminderTaps(openFromAlert);
+    const removePushes = listenLeadPushes();
+    return () => {
+      removeTaps();
+      removePushes();
+    };
   }, []);
 
   const refresh = useCallback(async () => {
@@ -62,20 +77,26 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
     if (!accessToken || !user || !isSales(user.roles)) return;
     let stop = false;
     const tick = () => {
-      if (!stop) watchAssignedLeads(accessToken, user.name).catch(() => undefined);
+      if (!stop) watchAssignedLeads(accessToken, user.id, user.name).catch(() => undefined);
     };
     tick();
-    void registerPushToken(accessToken);
+    const register = setTimeout(() => {
+      if (stop) return;
+      void registerPushToken(accessToken, user.id).finally(() => {
+        if (!stop) void promptBackgroundOnce();
+      });
+    }, 5000);
     const timer = setInterval(tick, 45000);
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") tick();
     });
     return () => {
       stop = true;
+      clearTimeout(register);
       clearInterval(timer);
       sub.remove();
     };
-  }, [accessToken, user]);
+  }, [accessToken, user?.id, user?.name, user?.roles.join(",")]);
 
   const value = useMemo<ReminderState>(
     () => ({

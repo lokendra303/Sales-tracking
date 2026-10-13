@@ -1,3 +1,4 @@
+import "./config/timezone.js";
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";

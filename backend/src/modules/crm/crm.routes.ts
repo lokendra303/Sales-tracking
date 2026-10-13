@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 import { FollowUpType, LeadStatus, Temperature } from "@prisma/client";
 import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
-import { geocodeAddress } from "../../lib/geocode.js";
+import { searchPlaces } from "../../lib/geocode.js";
 import { badRequest, forbidden } from "../../lib/errors.js";
 import * as crm from "./crm.service.js";
 import { mobileSchema } from "../auth/auth.schema.js";
@@ -60,7 +60,7 @@ crmRouter.get(
   asyncHandler(async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     if (q.length < 3) throw badRequest("Enter an address to find on the map.");
-    const data = await geocodeAddress(q);
+    const data = await searchPlaces(q);
     res.json({ success: true, data });
   }),
 );
@@ -141,7 +141,8 @@ crmRouter.put(
   asyncHandler(async (req, res) => {
     const body = z
       .object({
-        name: z.string().min(2).optional(),
+        name: z.string().trim().min(2, "Enter the business name.").optional(),
+        phone: mobileSchema.optional(),
         contactPerson: z.string().optional(),
         businessType: z.string().optional(),
         address: z.string().optional(),
@@ -149,7 +150,7 @@ crmRouter.put(
         latitude: z.number().gte(-90).lte(90).nullable().optional(),
         longitude: z.number().gte(-180).lte(180).nullable().optional(),
         notes: z.string().optional(),
-        potential: z.number().nonnegative().optional(),
+        potential: z.number().nonnegative().nullable().optional(),
         temperature: z.enum(Temperature).optional(),
         status: z.enum(LeadStatus).optional(),
       })

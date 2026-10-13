@@ -1,15 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MapView } from "../components/MapView";
 import { useExecutives } from "../components/ExecFilter";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { mobileDigits } from "../lib/phone";
 
 type Lead = {
   id: number;
   name: string;
   phone: string;
   contactPerson: string | null;
+  businessType: string | null;
+  notes: string | null;
+  potential: number | null;
+  temperature: "HOT" | "WARM" | "COLD";
   address: string | null;
   city: string | null;
   latitude: number | null;
@@ -30,6 +35,8 @@ function mapsUrl(lead: Lead) {
   return q ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}` : null;
 }
 
+type GeoHit = { lat: number; lng: number; label: string; kind: string };
+
 export function LeadDetailPage() {
   const { id } = useParams();
   const { accessToken } = useAuth();
@@ -37,10 +44,41 @@ export function LeadDetailPage() {
   const [lead, setLead] = useState<Lead | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [matches, setMatches] = useState<GeoHit[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    phone: "",
+    contactPerson: "",
+    businessType: "",
+    potential: "",
+    temperature: "WARM" as Lead["temperature"],
+    notes: "",
+  });
+
+  function applyLead(next: Lead) {
+    setLead(next);
+    setForm({
+      name: next.name,
+      phone: next.phone,
+      contactPerson: next.contactPerson ?? "",
+      businessType: next.businessType ?? "",
+      potential: next.potential != null ? String(next.potential) : "",
+      temperature: next.temperature ?? "WARM",
+      notes: next.notes ?? "",
+    });
+    setAddress(next.address ?? "");
+    setCity(next.city ?? "");
+    setPin(next.latitude != null && next.longitude != null ? { lat: next.latitude, lng: next.longitude } : null);
+  }
 
   async function load() {
     if (!accessToken || !id) return;
-    setLead(await api<Lead>(`/leads/${id}`, { token: accessToken }));
+    applyLead(await api<Lead>(`/leads/${id}`, { token: accessToken }));
   }
 
   useEffect(() => {
@@ -80,20 +118,105 @@ export function LeadDetailPage() {
     }
   }
 
-  async function savePin(lat: number, lng: number) {
+  async function saveDetails(event: FormEvent) {
+    event.preventDefault();
     if (!accessToken || !lead) return;
+    if (form.phone.length !== 10) {
+      setError("Enter a 10-digit mobile number.");
+      return;
+    }
+    setSaving(true);
+    setError("");
     setNotice("");
     try {
-      setLead(
+      applyLead(
         await api<Lead>(`/leads/${lead.id}`, {
           method: "PUT",
           token: accessToken,
-          body: JSON.stringify({ latitude: lat, longitude: lng }),
+          body: JSON.stringify({
+            name: form.name.trim(),
+            phone: form.phone,
+            contactPerson: form.contactPerson.trim(),
+            businessType: form.businessType.trim(),
+            potential: form.potential ? Number(form.potential) : null,
+            temperature: form.temperature,
+            notes: form.notes.trim(),
+          }),
         }),
       );
-      setNotice("Shop pin saved. The executive can follow this map.");
+      setEditing(false);
+      setNotice("Lead details saved.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the pin.");
+      setError(err instanceof Error ? err.message : "Could not save the lead.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function findAddress() {
+    if (!accessToken) return;
+    const query = [address, city].filter(Boolean).join(", ");
+    setError("");
+    setNotice("");
+    setMatches([]);
+    if (query.length < 3) {
+      setError("Type the shop address or city first.");
+      return;
+    }
+    try {
+      const hits = await api<GeoHit[]>(`/geo?q=${encodeURIComponent(query)}`, { token: accessToken });
+      if (!hits.length) {
+        setError("No match for that address. Click the exact shop on the map.");
+        return;
+      }
+      setMatches(hits);
+      setPin({ lat: hits[0].lat, lng: hits[0].lng });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not search that address.");
+    }
+  }
+
+  function useMyLocation() {
+    setError("");
+    if (!navigator.geolocation) {
+      setError("This browser cannot share location. Click the map instead.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setPin({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => setError("Allow location, or click the exact shop on the map."),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  }
+
+  async function saveLocation() {
+    if (!accessToken || !lead) return;
+    if (!pin) {
+      setError("Drop the shop pin on the map before saving.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      applyLead(
+        await api<Lead>(`/leads/${lead.id}`, {
+          method: "PUT",
+          token: accessToken,
+          body: JSON.stringify({
+            address: address.trim(),
+            city: city.trim(),
+            latitude: pin.lat,
+            longitude: pin.lng,
+          }),
+        }),
+      );
+      setMatches([]);
+      setNotice("Location saved. The executive finishes the visit within 300 m of this pin.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the location.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -107,10 +230,10 @@ export function LeadDetailPage() {
   }
 
   const route = mapsUrl(lead);
-  const pins =
-    lead.latitude != null && lead.longitude != null
-      ? [{ lat: lead.latitude, lng: lead.longitude, label: lead.name, extra: [lead.address, lead.city].filter(Boolean).join(", ") }]
-      : [];
+  const pins = pin ? [{ lat: pin.lat, lng: pin.lng, label: lead.name, extra: [address, city].filter(Boolean).join(", ") }] : [];
+  const moved =
+    pin != null && (lead.latitude == null || lead.longitude == null || pin.lat !== lead.latitude || pin.lng !== lead.longitude);
+  const edited = moved || address !== (lead.address ?? "") || city !== (lead.city ?? "");
 
   return (
     <div className="page">
@@ -164,10 +287,111 @@ export function LeadDetailPage() {
             Follow map
           </a>
         ) : null}
+        <button className="btn green" type="button" onClick={() => setEditing((open) => !open)}>
+          {editing ? "Close edit" : "Edit lead"}
+        </button>
       </div>
 
-      <p className="muted">Click the map to drop the shop pin. The assigned executive uses this to navigate.</p>
-      <MapView pins={pins} height={360} onPick={savePin} />
+      {editing ? (
+        <form className="card form wide" onSubmit={saveDetails}>
+          <h2>Edit lead</h2>
+          <div className="grid-2">
+            <label>
+              Business name *
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </label>
+            <label>
+              Phone *
+              <input
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: mobileDigits(e.target.value) })}
+                inputMode="numeric"
+                autoComplete="tel"
+                placeholder="10-digit mobile"
+                required
+              />
+            </label>
+            <label>
+              Contact person
+              <input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} />
+            </label>
+            <label>
+              Business type
+              <input value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value })} />
+            </label>
+            <label>
+              Potential (₹)
+              <input
+                value={form.potential}
+                onChange={(e) => setForm({ ...form, potential: e.target.value.replace(/[^\d.]/g, "") })}
+                inputMode="decimal"
+              />
+            </label>
+            <label>
+              Temperature
+              <select
+                value={form.temperature}
+                onChange={(e) => setForm({ ...form, temperature: e.target.value as Lead["temperature"] })}
+              >
+                <option value="HOT">Hot</option>
+                <option value="WARM">Warm</option>
+                <option value="COLD">Cold</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            Notes
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} />
+          </label>
+          <p className="muted">Change the address and map pin in Shop location below.</p>
+          <button className="btn green" disabled={saving}>
+            {saving ? "Saving…" : "Save details"}
+          </button>
+        </form>
+      ) : null}
+
+      <section className="card form wide">
+        <h2>Shop location</h2>
+        <p className="muted">
+          The executive can start the visit anywhere. Finishing it needs the phone within 300 m of this pin, so place it on the
+          exact shop.
+        </p>
+        <div className="grid-2">
+          <label>
+            Address
+            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area, landmark" />
+          </label>
+          <label>
+            City
+            <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
+          </label>
+        </div>
+        <div className="toolbar">
+          <button className="btn blue" type="button" onClick={findAddress}>
+            Find address on map
+          </button>
+          <button className="link" type="button" onClick={useMyLocation}>
+            Use my location
+          </button>
+          <span className="muted">
+            {pin ? `Pin ${pin.lat.toFixed(6)}, ${pin.lng.toFixed(6)}` : "No pin yet. Click the shop on the map."}
+          </span>
+        </div>
+        {matches.length > 1 ? (
+          <div className="pick-list">
+            {matches.map((hit) => (
+              <button key={`${hit.lat},${hit.lng}`} type="button" onClick={() => setPin({ lat: hit.lat, lng: hit.lng })}>
+                {hit.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <MapView pins={pins} height={360} onPick={(lat, lng) => setPin({ lat, lng })} />
+        <p className="muted">Click the map to move the pin, then save.</p>
+        <button className="btn green" type="button" onClick={saveLocation} disabled={saving || !edited || !pin}>
+          {saving ? "Saving…" : "Save location"}
+        </button>
+      </section>
     </div>
   );
 }

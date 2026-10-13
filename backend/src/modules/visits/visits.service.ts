@@ -52,27 +52,14 @@ async function loadPlace(input: { tenantId: number; leadId?: number; customerId?
   return { lead, customer, leadId: lead?.id ?? null, customerId: customer?.id ?? null, beatStopId: beatStopId ?? null, placeLat, placeLng };
 }
 
-function checkDistance(
-  phone: { lat: number; lng: number },
-  place: { lat: number | null; lng: number | null },
-  radiusMeters: number,
-  allowUnverified: boolean,
-) {
+export const FINISH_RADIUS_METERS = 300;
+
+function measureDistance(phone: { lat: number; lng: number }, place: { lat: number | null; lng: number | null }) {
   if (place.lat == null || place.lng == null) {
-    if (!allowUnverified) {
-      throw badRequest("This stop has no map pin. Ask your manager to add the shop location.");
-    }
     return { distanceMeters: null as number | null, verified: false };
   }
-
   const distanceMeters = haversineMeters(phone, { lat: place.lat, lng: place.lng });
-  if (distanceMeters > radiusMeters && !allowUnverified) {
-    throw badRequest(`You are ${distanceMeters} m away. Need to be within ${radiusMeters} m.`, "TOO_FAR", {
-      distanceMeters,
-      radiusMeters,
-    });
-  }
-  return { distanceMeters, verified: distanceMeters <= radiusMeters };
+  return { distanceMeters, verified: distanceMeters <= FINISH_RADIUS_METERS };
 }
 
 export async function previewCheckin(input: {
@@ -83,13 +70,8 @@ export async function previewCheckin(input: {
   lat: number;
   lng: number;
 }) {
-  const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: input.tenantId } });
   const place = await loadPlace(input);
-  const radiusMeters = settings?.visitCheckinRadiusMeters ?? 100;
-  let distanceMeters: number | null = null;
-  if (place.placeLat != null && place.placeLng != null) {
-    distanceMeters = haversineMeters({ lat: input.lat, lng: input.lng }, { lat: place.placeLat, lng: place.placeLng });
-  }
+  const measured = measureDistance({ lat: input.lat, lng: input.lng }, { lat: place.placeLat, lng: place.placeLng });
   return {
     name: place.lead?.name ?? place.customer?.name ?? "Visit",
     phone: place.lead?.phone ?? place.customer?.phone ?? null,
@@ -100,11 +82,11 @@ export async function previewCheckin(input: {
     leadId: place.leadId,
     customerId: place.customerId,
     beatStopId: place.beatStopId,
-    distanceMeters,
-    radiusMeters,
-    withinRadius: distanceMeters != null && distanceMeters <= radiusMeters,
+    distanceMeters: measured.distanceMeters,
+    radiusMeters: FINISH_RADIUS_METERS,
+    withinRadius: measured.verified,
     hasPin: place.placeLat != null && place.placeLng != null,
-    allowUnverified: settings?.allowUnverifiedCheckin ?? false,
+    allowUnverified: true,
   };
 }
 
@@ -142,7 +124,6 @@ export async function checkIn(input: {
     return publicVisit(open);
   }
 
-  const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: input.tenantId } });
   const place = await loadPlace(input);
   if (place.lead && place.lead.approvalStatus !== "APPROVED") {
     throw badRequest(
@@ -166,11 +147,9 @@ export async function checkIn(input: {
     });
     if (stop) place.beatStopId = stop.id;
   }
-  const check = checkDistance(
+  const check = measureDistance(
     { lat: input.lat, lng: input.lng },
     { lat: place.placeLat, lng: place.placeLng },
-    settings?.visitCheckinRadiusMeters ?? 100,
-    settings?.allowUnverifiedCheckin ?? false,
   );
 
   const visit = await prisma.visit.create({
@@ -227,9 +206,10 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
     throw forbidden("Managers do not have a field beat.");
   }
 
-  const settings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
   const { start, end } = dayBounds();
-  const [stops, active, done, todayVisits] = await Promise.all([
+  const since = new Date(start);
+  since.setDate(since.getDate() - 30);
+  const [stops, active, done, todayVisits, recentDone] = await Promise.all([
     prisma.beatStop.findMany({
       where: {
         tenantId,
@@ -254,7 +234,14 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
       include: { sales: { select: { id: true }, orderBy: { createdAt: "desc" as const }, take: 1 } },
       orderBy: { checkedInAt: "desc" },
     }),
+    prisma.visit.findMany({
+      where: { tenantId, userId, status: "COMPLETED", outcome: "SUCCESS", checkedInAt: { gte: since, lt: start } },
+      include: { sales: { select: { id: true }, orderBy: { createdAt: "desc" as const }, take: 1 } },
+      orderBy: { checkedInAt: "desc" },
+    }),
   ]);
+  const samePlace = (stop: { leadId: number | null; customerId: number | null }) => (visit: { leadId: number | null; customerId: number | null }) =>
+    Boolean((stop.leadId && visit.leadId === stop.leadId) || (stop.customerId && visit.customerId === stop.customerId));
 
   let items = stops;
   if (!items.length) {
@@ -280,17 +267,18 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
   }
 
   return {
-    radiusMeters: settings?.visitCheckinRadiusMeters ?? 100,
+    radiusMeters: FINISH_RADIUS_METERS,
     completedToday: done,
     activeVisit: active ? publicVisit(active) : null,
     stops: items.map((stop) => {
       const place = stop.lead ?? stop.customer;
+      const today = todayVisits.filter(samePlace(stop));
       const latest =
-        todayVisits.find(
-          (visit) =>
-            (stop.leadId && visit.leadId === stop.leadId) ||
-            (stop.customerId && visit.customerId === stop.customerId),
-        ) ?? null;
+        today.find((visit) => visit.status === "IN_PROGRESS") ??
+        today.find((visit) => visit.status === "COMPLETED") ??
+        today[0] ??
+        (stop.plannedAt ? null : recentDone.find(samePlace(stop))) ??
+        null;
       return {
         id: stop.id || null,
         sequence: stop.sequence,
@@ -305,6 +293,8 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
         visitId: latest?.id ?? null,
         visitStatus: latest?.status ?? null,
         visitOutcome: latest?.outcome ?? null,
+        visitAt: latest ? latest.checkedOutAt ?? latest.checkedInAt : null,
+        visitedToday: Boolean(latest && latest.checkedInAt >= start),
         saleAmount: asNumber(latest?.saleAmount),
         saleId: latest?.sales?.[0]?.id ?? null,
       };
@@ -363,6 +353,9 @@ export async function completeVisit(input: {
   notes?: string;
   collectionAmount?: number;
   checkedOutAt?: string;
+  lat?: number;
+  lng?: number;
+  accuracy?: number;
 }) {
   if (isManager(input.roles)) {
     throw forbidden("Managers review visits. They do not complete field visits.");
@@ -377,6 +370,21 @@ export async function completeVisit(input: {
   if (input.outcome === "SUCCESS" && !visit.photoPath) {
     throw badRequest("Take a place photo before completing a successful visit.");
   }
+  if (input.lat == null || input.lng == null) {
+    throw badRequest("Turn on location to finish the visit. You need to be within 300 m of the shop.");
+  }
+  const placeLat = asNumber(visit.lead?.latitude ?? visit.customer?.latitude);
+  const placeLng = asNumber(visit.lead?.longitude ?? visit.customer?.longitude);
+  if (placeLat == null || placeLng == null) {
+    throw badRequest("This shop has no map pin. Ask your manager to correct the location, then finish the visit.");
+  }
+  const distanceMeters = haversineMeters({ lat: input.lat, lng: input.lng }, { lat: placeLat, lng: placeLng });
+  if (distanceMeters - Math.min(input.accuracy ?? 0, 100) > FINISH_RADIUS_METERS) {
+    throw badRequest(`You are ${distanceMeters} m from the shop. Finish the visit within 300 m.`, "TOO_FAR", {
+      distanceMeters,
+      radiusMeters: FINISH_RADIUS_METERS,
+    });
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.visit.update({
@@ -387,6 +395,8 @@ export async function completeVisit(input: {
         notes: input.notes,
         checkedOutAt: clientTime(input.checkedOutAt),
         collectionAmount: input.collectionAmount,
+        distanceMeters,
+        verified: true,
       },
       include: visitInclude,
     });

@@ -109,7 +109,7 @@ a:hover { color: var(--teal-2); }
 .form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .row-form { width: auto; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; }
-input, .search, select {
+input, .search, select, textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px 14px;
@@ -118,7 +118,8 @@ input, .search, select {
   background: #fff;
   color: var(--text);
 }
-input:focus, .search:focus, select:focus {
+textarea { resize: vertical; }
+input:focus, .search:focus, select:focus, textarea:focus {
   outline: 2px solid rgba(15, 76, 92, 0.28);
   border-color: var(--teal);
 }
@@ -209,6 +210,16 @@ input:focus, .search:focus, select:focus {
 .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
 .toolbar .search { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+.pick-list { display: grid; gap: 8px; margin: 0 0 16px; }
+.pick-list button {
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  cursor: pointer;
+}
 .chip {
   border: 1px solid var(--line);
   background: #fff;

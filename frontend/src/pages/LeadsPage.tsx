@@ -87,14 +87,15 @@ export function LeadsPage() {
     }
     setError("");
     try {
-      const found = await api<{ lat: number; lng: number } | null>(`/geo?q=${encodeURIComponent(query)}`, {
+      const hits = await api<{ lat: number; lng: number }[]>(`/geo?q=${encodeURIComponent(query)}`, {
         token: accessToken,
       });
-      if (!found) {
+      if (!hits.length) {
         setError("Could not find that address. Click the map to drop a pin.");
         return;
       }
-      setPin({ lat: found.lat, lng: found.lng });
+      setPin({ lat: hits[0].lat, lng: hits[0].lng });
+      setNotice("Check the pin is on the shop. Click the map to move it.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not find that address.");
     }
@@ -347,6 +348,9 @@ export function LeadsPage() {
                     </option>
                   ))}
                 </select>
+                <Link className="btn blue" to={`/leads/${lead.id}`}>
+                  Edit
+                </Link>
                 {hasPin || place ? (
                   <a
                     href={

@@ -134,6 +134,8 @@ export type BeatStop = {
   visitId: number | null;
   visitStatus: string | null;
   visitOutcome: string | null;
+  visitAt?: string | null;
+  visitedToday?: boolean;
   saleAmount?: number | null;
   saleId?: number | null;
 };

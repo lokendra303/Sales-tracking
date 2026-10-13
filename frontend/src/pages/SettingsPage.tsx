@@ -54,7 +54,7 @@ export function SettingsPage() {
         </div>
       </article>
       <article className="card">
-        <p>Visit check-in radius: {settings.visitCheckinRadiusMeters} m</p>
+        <p>A visit can start from anywhere. Finishing it needs the phone within 300 m of the shop pin.</p>
         <p>Tracking interval: {Math.round(settings.trackingIntervalSeconds / 60)} min</p>
         <p>Currency: {settings.currency}</p>
         <p>Timezone: {settings.timezone}</p>
