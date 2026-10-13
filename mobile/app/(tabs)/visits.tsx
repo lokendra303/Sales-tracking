@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useFocusEffect, router, useLocalSearchParams, type Href } from "expo-router";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
-import { ActionRow, Badge, Button, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
+import { ActionRow, Badge, Button, Card, Chip, EmptyState, Screen, ScreenHeader } from "@/components/ui";
+import { VisitHistory } from "@/components/visit-history";
 import { useAuth } from "@/lib/auth";
-import { api, type BeatPlan, type BeatStop, type BeatToday, type Visit } from "@/lib/api";
+import { api, type BeatPlan, type BeatStop, type BeatToday } from "@/lib/api";
 import { readLocalVisits, type LocalVisit } from "@/lib/local-visits";
 import { useOffline } from "@/lib/offline";
 import { openCall, openNavigate, openWhatsApp, tomorrowDay, when } from "@/lib/format";
@@ -16,7 +17,7 @@ function stopBadge(stop: BeatStop, sending: boolean) {
   if (stop.visitStatus === "IN_PROGRESS") return { label: "In progress", tone: "blue" as const };
   if (stop.visitStatus === "COMPLETED") {
     if (stop.visitOutcome === "UNAVAILABLE") return { label: "Missed", tone: "amber" as const };
-    return { label: stop.visitedToday === false ? "Done earlier" : "Done", tone: "green" as const };
+    return { label: "Done", tone: "green" as const };
   }
   return { label: "Pending", tone: "slate" as const };
 }
@@ -35,26 +36,18 @@ export default function VisitsScreen() {
   const offline = useOffline();
   const [beat, setBeat] = useState<BeatToday | null>(null);
   const [tomorrow, setTomorrow] = useState<BeatPlan | null>(null);
-  const [proofs, setProofs] = useState<Visit[]>([]);
   const [drafts, setDrafts] = useState<LocalVisit[]>([]);
   const [exec, setExec] = useState<ExecValue>(execFromParam(params.userId));
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"today" | "history">("today");
 
   useEffect(() => {
     setExec(execFromParam(params.userId));
   }, [params.userId]);
 
   const load = useCallback(() => {
+    if (!accessToken || manager) return;
     readLocalVisits().then(setDrafts);
-    if (!accessToken) return;
-    if (manager) {
-      const qs = typeof exec === "number" ? `&userId=${exec}` : "";
-      api<Visit[]>(`/visits?days=14${qs}`, { token: accessToken })
-        .then(setProofs)
-        .catch(() => undefined)
-        .finally(() => setLoading(false));
-      return;
-    }
     api<BeatToday>("/beat/today", { token: accessToken })
       .then(setBeat)
       .catch(() => undefined)
@@ -62,7 +55,7 @@ export default function VisitsScreen() {
     api<BeatPlan>(`/beat?date=${tomorrowDay()}`, { token: accessToken })
       .then(setTomorrow)
       .catch(() => undefined);
-  }, [accessToken, manager, exec]);
+  }, [accessToken, manager]);
 
   useFocusEffect(load);
 
@@ -75,43 +68,22 @@ export default function VisitsScreen() {
 
   if (manager) {
     return (
-      <Screen header={<ScreenHeader title="Visit proof" subtitle="Pick an executive, or keep the whole team" />}>
+      <Screen header={<ScreenHeader title="Team visits" subtitle="Filter by executive, date and status" />}>
         <ExecFilter people={people} value={exec} onChange={setExec} />
-        {loading ? (
-          <ActivityIndicator color={colors.blue} />
-        ) : proofs.length === 0 ? (
-          <EmptyState icon="camera-outline" text="No visits in this view. The executive uploads a shop photo after check-in." />
-        ) : (
-          proofs.map((visit) => (
-            <Pressable key={visit.id} onPress={() => router.push(`/visit/${visit.id}`)}>
-              <Card>
-                <View style={styles.row}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.name}>{visit.name}</Text>
-                    <Text style={typo.muted}>
-                      {visit.userName || "Sales"} · {when(visit.checkedInAt)}
-                    </Text>
-                    <Text style={typo.muted}>
-                      {visit.hasPhoto ? "Photo uploaded" : "No photo"}
-                      {visit.verified ? " · GPS verified" : " · GPS not verified"}
-                      {visit.distanceMeters != null ? ` · ${visit.distanceMeters} m` : ""}
-                    </Text>
-                  </View>
-                  <Badge
-                    label={visit.managerConfirmedAt ? "Confirmed" : visit.outcome === "UNAVAILABLE" ? "Missed" : visit.status === "IN_PROGRESS" ? "Live visit" : "Review"}
-                    tone={visit.managerConfirmedAt ? "green" : visit.outcome === "UNAVAILABLE" ? "amber" : "blue"}
-                  />
-                </View>
-              </Card>
-            </Pressable>
-          ))
-        )}
+        <VisitHistory userId={typeof exec === "number" ? exec : undefined} showPerson />
       </Screen>
     );
   }
 
   return (
-      <Screen header={<ScreenHeader title="Visits" subtitle="Today’s beat · check in, then take a shop photo" />}>
+      <Screen header={<ScreenHeader title="Visits" subtitle={tab === "today" ? "Today’s beat · check in, then take a shop photo" : "Your visits by date and status"} />}>
+      <View style={styles.tabs}>
+        <Chip label="Today" on={tab === "today"} onPress={() => setTab("today")} />
+        <Chip label="History" on={tab === "history"} onPress={() => setTab("history")} />
+      </View>
+      {tab === "history" ? <VisitHistory /> : null}
+      {tab === "today" ? (
+      <>
       {drafts.map((draft) => (
         <Pressable key={draft.localId} style={styles.active} onPress={() => router.push({ pathname: "/visit/draft", params: { id: draft.localId } } as unknown as Href)}>
           <Badge label="Saved on phone" tone="amber" />
@@ -178,9 +150,6 @@ export default function VisitsScreen() {
                 ) : done && stop.visitId ? (
                   <>
                     <Button title="View visit" tone="green" onPress={() => router.push(`/visit/${stop.visitId}`)} />
-                    {stop.visitedToday === false && !beat.activeVisit ? (
-                      <Button title="Visit again" tone="outline" onPress={() => router.push({ pathname: "/visit/check-in", params })} />
-                    ) : null}
                     {stop.visitOutcome === "SUCCESS" && !stop.saleId ? (
                       <Button
                         title="Record sale"
@@ -223,11 +192,14 @@ export default function VisitsScreen() {
           ) : null}
         </>
       )}
+      </>
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  tabs: { flexDirection: "row", gap: 8 },
   count: { color: colors.muted, fontWeight: "700" },
   active: {
     backgroundColor: colors.greenSoft,

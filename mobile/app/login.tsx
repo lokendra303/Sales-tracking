@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Redirect, router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Field, PasswordField, Screen } from "@/components/ui";
 import { isOfflineError } from "@/lib/api";
@@ -41,9 +41,8 @@ export default function LoginScreen() {
   return (
     <Screen keyboard>
       <View style={styles.hero}>
-        <View style={styles.logo}>
-          <Ionicons name="trending-up" size={34} color="#fff" />
-        </View>
+        <Image source={require("@/assets/images/icon.png")} style={styles.logo} accessibilityIgnoresInvertColors />
+
         <Text style={styles.brand}>SalesTrack</Text>
         <Text style={styles.sub}>Grow together</Text>
       </View>
@@ -81,14 +80,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   hero: { alignItems: "center", paddingTop: 28, paddingBottom: 8, gap: 8 },
-  logo: {
-    width: 76,
-    height: 76,
-    borderRadius: 24,
-    backgroundColor: colors.blue,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  logo: { width: 84, height: 84, borderRadius: 24 },
   brand: { fontSize: 30, fontWeight: "800", color: colors.text, letterSpacing: -0.6 },
   sub: { ...typo.muted, fontSize: 15 },
   card: { gap: 14, paddingTop: 12 },

@@ -29,17 +29,25 @@ export type Visit = {
   checkedOutAt: string | null;
   checkinLat: number | null;
   checkinLng: number | null;
+  checkinAccuracy?: number | null;
+  checkinDistanceMeters?: number | null;
+  checkoutLat?: number | null;
+  checkoutLng?: number | null;
+  checkoutAccuracy?: number | null;
+  finishDistanceMeters?: number | null;
   distanceMeters: number | null;
   verified: boolean;
   hasPhoto: boolean;
   photoLat: number | null;
   photoLng: number | null;
+  photoAccuracy?: number | null;
   photoCapturedAt: string | null;
   photoReceivedAt: string | null;
   managerConfirmedAt: string | null;
   saleAmount: number | null;
   collectionAmount: number | null;
   saleId: number | null;
+  saleHasBill?: boolean;
 };
 
 export type Sale = {

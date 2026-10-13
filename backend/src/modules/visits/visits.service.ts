@@ -1,15 +1,16 @@
 import path from "node:path";
 import { FollowUpType, type RoleCode } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
-import { badRequest, forbidden, notFound } from "../../lib/errors.js";
+import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { isManager } from "../crm/crm.helpers.js";
+import { parseDay } from "../beat/beat.helpers.js";
 import { asNumber, dayBounds, haversineMeters, publicVisit, tomorrowMorning } from "./visits.helpers.js";
 
 const visitInclude = {
   user: { select: { id: true, name: true } },
   lead: { select: { id: true, name: true, phone: true, address: true, city: true, latitude: true, longitude: true } },
   customer: { select: { id: true, name: true, phone: true, address: true, city: true, latitude: true, longitude: true } },
-  sales: { select: { id: true }, orderBy: { createdAt: "desc" as const }, take: 1 },
+  sales: { select: { id: true, billPhotoPath: true }, orderBy: { createdAt: "desc" as const }, take: 1 },
 };
 
 function visitScope(tenantId: number, userId: number, roles: RoleCode[]) {
@@ -62,8 +63,29 @@ function measureDistance(phone: { lat: number; lng: number }, place: { lat: numb
   return { distanceMeters, verified: distanceMeters <= FINISH_RADIUS_METERS };
 }
 
+async function finishedToday(tenantId: number, userId: number, place: { leadId: number | null; customerId: number | null }) {
+  if (!place.leadId && !place.customerId) return null;
+  const { start, end } = dayBounds();
+  return prisma.visit.findFirst({
+    where: {
+      tenantId,
+      userId,
+      status: "COMPLETED",
+      outcome: "SUCCESS",
+      checkedInAt: { gte: start, lte: end },
+      OR: [
+        ...(place.leadId ? [{ leadId: place.leadId }] : []),
+        ...(place.customerId ? [{ customerId: place.customerId }] : []),
+      ],
+    },
+    select: { id: true },
+    orderBy: { checkedInAt: "desc" },
+  });
+}
+
 export async function previewCheckin(input: {
   tenantId: number;
+  userId: number;
   leadId?: number;
   customerId?: number;
   beatStopId?: number;
@@ -72,7 +94,9 @@ export async function previewCheckin(input: {
 }) {
   const place = await loadPlace(input);
   const measured = measureDistance({ lat: input.lat, lng: input.lng }, { lat: place.placeLat, lng: place.placeLng });
+  const done = await finishedToday(input.tenantId, input.userId, place);
   return {
+    doneTodayVisitId: done?.id ?? null,
     name: place.lead?.name ?? place.customer?.name ?? "Visit",
     phone: place.lead?.phone ?? place.customer?.phone ?? null,
     address: place.lead?.address ?? place.customer?.address ?? null,
@@ -116,21 +140,32 @@ export async function checkIn(input: {
     throw forbidden("Managers review visits. They do not check in.");
   }
 
+  const place = await loadPlace(input);
   const open = await prisma.visit.findFirst({
     where: { tenantId: input.tenantId, userId: input.userId, status: "IN_PROGRESS" },
     include: visitInclude,
   });
   if (open) {
-    return publicVisit(open);
+    const samePlace =
+      (place.leadId != null && open.leadId === place.leadId) ||
+      (place.customerId != null && open.customerId === place.customerId);
+    if (samePlace) return publicVisit(open);
+    const where = open.lead?.name ?? open.customer?.name ?? "another shop";
+    throw conflict(`Finish your visit at ${where} first. Only one visit can be open at a time.`, { visitId: open.id });
   }
 
-  const place = await loadPlace(input);
   if (place.lead && place.lead.approvalStatus !== "APPROVED") {
     throw badRequest(
       place.lead.approvalStatus === "REJECTED"
         ? "The manager rejected this lead."
         : "This lead is waiting for manager approval.",
     );
+  }
+  const done = await finishedToday(input.tenantId, input.userId, place);
+  if (done) {
+    throw conflict("You already finished a visit at this shop today. Open it from Visits to see the proof.", {
+      visitId: done.id,
+    });
   }
   if (!place.beatStopId) {
     const { start, end } = dayBounds();
@@ -163,6 +198,7 @@ export async function checkIn(input: {
       checkinLat: input.lat,
       checkinLng: input.lng,
       checkinAccuracy: input.accuracy,
+      checkinDistanceMeters: check.distanceMeters,
       distanceMeters: check.distanceMeters,
       verified: check.verified,
     },
@@ -181,22 +217,50 @@ export async function getVisit(tenantId: number, userId: number, roles: RoleCode
   return publicVisit(visit);
 }
 
-export async function listVisits(tenantId: number, userId: number, roles: RoleCode[], days = 14, forUserId?: number) {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - Math.max(1, days));
-  start.setHours(0, 0, 0, 0);
+export type VisitFilter = "all" | "completed" | "missed" | "in_progress";
+
+const visitFilterWhere: Record<VisitFilter, object> = {
+  all: {},
+  completed: { status: "COMPLETED", outcome: "SUCCESS" },
+  missed: { status: "COMPLETED", outcome: "UNAVAILABLE" },
+  in_progress: { status: "IN_PROGRESS" },
+};
+
+export async function listVisits(input: {
+  tenantId: number;
+  userId: number;
+  roles: RoleCode[];
+  days?: number;
+  from?: string;
+  to?: string;
+  status?: VisitFilter;
+  forUserId?: number;
+}) {
+  let start: Date;
+  let end: Date;
+  if (input.from) {
+    start = parseDay(input.from).start;
+    end = parseDay(input.to || input.from).end;
+    if (end < start) [start, end] = [parseDay(input.to).start, parseDay(input.from).end];
+  } else {
+    end = new Date();
+    start = new Date();
+    start.setDate(start.getDate() - Math.max(1, input.days ?? 14));
+    start.setHours(0, 0, 0, 0);
+  }
   const scope =
-    isManager(roles) && forUserId
-      ? { tenantId, userId: forUserId }
-      : visitScope(tenantId, userId, roles);
+    isManager(input.roles) && input.forUserId
+      ? { tenantId: input.tenantId, userId: input.forUserId }
+      : visitScope(input.tenantId, input.userId, input.roles);
   const visits = await prisma.visit.findMany({
     where: {
       ...scope,
+      ...visitFilterWhere[input.status ?? "all"],
       checkedInAt: { gte: start, lte: end },
     },
     include: visitInclude,
     orderBy: { checkedInAt: "desc" },
+    take: 500,
   });
   return visits.map(publicVisit);
 }
@@ -207,9 +271,7 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
   }
 
   const { start, end } = dayBounds();
-  const since = new Date(start);
-  since.setDate(since.getDate() - 30);
-  const [stops, active, done, todayVisits, recentDone] = await Promise.all([
+  const [stops, active, done, todayVisits] = await Promise.all([
     prisma.beatStop.findMany({
       where: {
         tenantId,
@@ -234,21 +296,31 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
       include: { sales: { select: { id: true }, orderBy: { createdAt: "desc" as const }, take: 1 } },
       orderBy: { checkedInAt: "desc" },
     }),
-    prisma.visit.findMany({
-      where: { tenantId, userId, status: "COMPLETED", outcome: "SUCCESS", checkedInAt: { gte: since, lt: start } },
-      include: { sales: { select: { id: true }, orderBy: { createdAt: "desc" as const }, take: 1 } },
-      orderBy: { checkedInAt: "desc" },
-    }),
   ]);
   const samePlace = (stop: { leadId: number | null; customerId: number | null }) => (visit: { leadId: number | null; customerId: number | null }) =>
     Boolean((stop.leadId && visit.leadId === stop.leadId) || (stop.customerId && visit.customerId === stop.customerId));
 
   let items = stops;
-  if (!items.length) {
+  const planned = items.length > 0;
+  if (!planned) {
     const leads = await prisma.lead.findMany({
-      where: { tenantId, assigneeId: userId, status: { notIn: ["WON", "LOST"] }, approvalStatus: "APPROVED" },
+      where: {
+        tenantId,
+        assigneeId: userId,
+        approvalStatus: "APPROVED",
+        OR: [
+          { visits: { some: { userId, checkedInAt: { gte: start, lte: end } } } },
+          {
+            status: { notIn: ["WON", "LOST"] },
+            OR: [
+              { visits: { none: { userId, status: "COMPLETED", outcome: "SUCCESS", checkedInAt: { lt: start } } } },
+              { followUps: { some: { userId, type: "VISIT", doneAt: null, dueAt: { lte: end } } } },
+            ],
+          },
+        ],
+      },
       orderBy: { updatedAt: "desc" },
-      take: 20,
+      take: 30,
     });
     items = leads.map((lead, index) => ({
       id: 0,
@@ -266,39 +338,47 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
     }));
   }
 
+  const rows = items.map((stop) => {
+    const place = stop.lead ?? stop.customer;
+    const today = todayVisits.filter(samePlace(stop));
+    const latest =
+      today.find((visit) => visit.status === "IN_PROGRESS") ??
+      today.find((visit) => visit.status === "COMPLETED") ??
+      today[0] ??
+      null;
+    return {
+      id: stop.id || null,
+      sequence: stop.sequence,
+      leadId: stop.leadId,
+      customerId: stop.customerId,
+      name: place?.name ?? "Stop",
+      phone: place?.phone ?? null,
+      address: place?.address ?? null,
+      city: place?.city ?? null,
+      placeLat: asNumber(place?.latitude),
+      placeLng: asNumber(place?.longitude),
+      visitId: latest?.id ?? null,
+      visitStatus: latest?.status ?? null,
+      visitOutcome: latest?.outcome ?? null,
+      visitAt: latest ? latest.checkedOutAt ?? latest.checkedInAt : null,
+      visitedToday: Boolean(latest),
+      saleAmount: asNumber(latest?.saleAmount),
+      saleId: latest?.sales?.[0]?.id ?? null,
+    };
+  });
+  if (!planned) {
+    const finished = (row: (typeof rows)[number]) => (row.visitStatus === "COMPLETED" && row.visitOutcome === "SUCCESS" ? 1 : 0);
+    rows.sort((a, b) => finished(a) - finished(b));
+    rows.forEach((row, index) => {
+      row.sequence = index + 1;
+    });
+  }
+
   return {
     radiusMeters: FINISH_RADIUS_METERS,
     completedToday: done,
     activeVisit: active ? publicVisit(active) : null,
-    stops: items.map((stop) => {
-      const place = stop.lead ?? stop.customer;
-      const today = todayVisits.filter(samePlace(stop));
-      const latest =
-        today.find((visit) => visit.status === "IN_PROGRESS") ??
-        today.find((visit) => visit.status === "COMPLETED") ??
-        today[0] ??
-        (stop.plannedAt ? null : recentDone.find(samePlace(stop))) ??
-        null;
-      return {
-        id: stop.id || null,
-        sequence: stop.sequence,
-        leadId: stop.leadId,
-        customerId: stop.customerId,
-        name: place?.name ?? "Stop",
-        phone: place?.phone ?? null,
-        address: place?.address ?? null,
-        city: place?.city ?? null,
-        placeLat: asNumber(place?.latitude),
-        placeLng: asNumber(place?.longitude),
-        visitId: latest?.id ?? null,
-        visitStatus: latest?.status ?? null,
-        visitOutcome: latest?.outcome ?? null,
-        visitAt: latest ? latest.checkedOutAt ?? latest.checkedInAt : null,
-        visitedToday: Boolean(latest && latest.checkedInAt >= start),
-        saleAmount: asNumber(latest?.saleAmount),
-        saleId: latest?.sales?.[0]?.id ?? null,
-      };
-    }),
+    stops: rows,
   };
 }
 
@@ -395,6 +475,9 @@ export async function completeVisit(input: {
         notes: input.notes,
         checkedOutAt: clientTime(input.checkedOutAt),
         collectionAmount: input.collectionAmount,
+        checkoutLat: input.lat,
+        checkoutLng: input.lng,
+        checkoutAccuracy: input.accuracy,
         distanceMeters,
         verified: true,
       },

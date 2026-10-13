@@ -5,9 +5,9 @@ import { api, type FollowUp } from "./api";
 import { promptBackgroundOnce } from "./background-permission";
 import { useAuth } from "./auth";
 import { persistGet, persistSet } from "./persist";
-import { clearOldBackgroundTasks, listenLeadPushes, registerPushToken, watchAssignedLeads } from "./lead-alerts";
+import { clearOldBackgroundTasks, listenLeadPushes, registerPushToken, watchAssignedLeads, watchPendingLeads } from "./lead-alerts";
 import { cancelAllReminders, listenReminderTaps, syncReminders } from "./reminders";
-import { isAdmin, isSales } from "./roles";
+import { isAdmin, isManager, isSales } from "./roles";
 
 type ReminderState = {
   enabled: boolean;
@@ -74,10 +74,15 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
-    if (!accessToken || !user || !isSales(user.roles)) return;
+    if (!accessToken || !user) return;
+    const sales = isSales(user.roles);
+    const manager = isManager(user.roles);
+    if (!sales && !manager) return;
     let stop = false;
     const tick = () => {
-      if (!stop) watchAssignedLeads(accessToken, user.id, user.name).catch(() => undefined);
+      if (stop) return;
+      if (sales) watchAssignedLeads(accessToken, user.id, user.name).catch(() => undefined);
+      if (manager) watchPendingLeads(accessToken, user.id).catch(() => undefined);
     };
     tick();
     const register = setTimeout(() => {

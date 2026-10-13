@@ -210,6 +210,9 @@ input:focus, .search:focus, select:focus, textarea:focus {
 .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
 .toolbar .search { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 8px 0; }
+.filters label { display: grid; gap: 4px; font-weight: 700; font-size: 0.9rem; }
+.filters .quick { display: flex; flex-wrap: wrap; gap: 14px; padding-bottom: 12px; }
 .pick-list { display: grid; gap: 8px; margin: 0 0 16px; }
 .pick-list button {
   text-align: left;
@@ -240,6 +243,7 @@ input:focus, .search:focus, select:focus, textarea:focus {
 .kpi .muted { margin: 0; }
 .list { display: grid; gap: 10px; margin-top: 16px; }
 .person { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.person + .proof, .person + p { margin-top: 12px; }
 .who { display: grid; gap: 2px; color: inherit; }
 .access { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
 .access li { display: grid; gap: 2px; }

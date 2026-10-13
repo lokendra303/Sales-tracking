@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { ManagerHome } from "@/components/manager-home";
 import { Avatar, Badge, Button, Card, EmptyState, Screen, ScreenHeader, Stat } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { useField } from "@/lib/field";
@@ -24,6 +25,8 @@ export default function HomeScreen() {
   const offline = useOffline();
   const firstName = user?.name.split(" ")[0] ?? "there";
   const roles = user?.roles ?? [];
+  const manager = isManager(roles);
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
   const offlineMessage = !offline.online
     ? offline.pending
       ? `${offline.pending} saved on this phone · sends when the network is back`
@@ -109,7 +112,7 @@ export default function HomeScreen() {
       header={
         <ScreenHeader
           title={`${greeting()}, ${firstName}`}
-          subtitle={roleLabel(roles)}
+          subtitle={manager ? `${roleLabel(roles)} · ${today}` : roleLabel(roles)}
           right={
             <View style={styles.headerRight}>
               {!isAdmin(roles) ? (
@@ -217,30 +220,31 @@ export default function HomeScreen() {
         </Card>
       ) : null}
 
-      {pendingApprovals > 0 ? (
-        <Card>
-          <Text style={styles.cardTitle}>{isManager(roles) ? "Leads to approve" : "Waiting for approval"}</Text>
-          <Text style={typo.muted}>
-            {isManager(roles)
-              ? `${pendingApprovals} new lead${pendingApprovals === 1 ? "" : "s"} from the field need your approval.`
-              : `${pendingApprovals} lead${pendingApprovals === 1 ? "" : "s"} you added ${pendingApprovals === 1 ? "is" : "are"} waiting for your manager.`}
-          </Text>
-          <Button
-            title={isManager(roles) ? "Review leads" : "View waiting leads"}
-            onPress={() => router.push({ pathname: "/leads", params: { filter: "pending" } })}
-          />
-        </Card>
+      {manager ? (
+        <ManagerHome
+          teamCount={teamCount}
+          todayLeads={todayLeads}
+          todayVisits={todayVisits}
+          todaySales={todaySales}
+          monthSales={monthSales}
+          monthTarget={monthTarget}
+          targetPercent={targetPercent}
+          overdue={overdue}
+          pendingApprovals={pendingApprovals}
+          upcoming={upcoming}
+        />
       ) : null}
 
-      {isManager(roles) ? (
+      {pendingApprovals > 0 && !manager ? (
         <Card>
-          <Text style={styles.cardTitle}>Monitor the field</Text>
+          <Text style={styles.cardTitle}>Waiting for approval</Text>
           <Text style={typo.muted}>
-            Assign leads to each executive on Leads. Then pick that person on Proof or Team to review only their
-            photos, GPS and sales. All executives stay listed unless you filter.
+            {`${pendingApprovals} lead${pendingApprovals === 1 ? "" : "s"} you added ${pendingApprovals === 1 ? "is" : "are"} waiting for your manager.`}
           </Text>
-          <Button title="Watch team live" onPress={() => router.push("/team")} />
-          <Button title="Visit photos and GPS" tone="outline" onPress={() => router.push("/visits")} />
+          <Button
+            title="View waiting leads"
+            onPress={() => router.push({ pathname: "/leads", params: { filter: "pending" } })}
+          />
         </Card>
       ) : null}
 
@@ -252,7 +256,7 @@ export default function HomeScreen() {
           </View>
           <Button title="Manage managers" onPress={() => router.push("/team")} />
         </Card>
-      ) : (
+      ) : manager ? null : (
         <Card>
           <Text style={styles.cardTitle}>{isSales(roles) ? "Today" : "Company today"}</Text>
           {isSales(roles) ? (
@@ -278,7 +282,7 @@ export default function HomeScreen() {
         </Card>
       )}
 
-      {isAdmin(roles) ? null : (
+      {isAdmin(roles) || manager ? null : (
         <Card>
           <Pressable onPress={() => router.push("/notifications")} style={styles.row}>
             <Text style={styles.cardTitle}>{isSales(roles) ? "Upcoming" : "Team follow-ups"}</Text>

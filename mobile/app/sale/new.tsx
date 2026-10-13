@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
-import { Alert, StyleSheet, Text } from "react-native";
-import { Button, Field, Screen, ScreenHeader } from "@/components/ui";
+import { Alert, Image, StyleSheet, Text } from "react-native";
+import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, apiUpload, isOfflineError, type Sale } from "@/lib/api";
 import { useOffline } from "@/lib/offline";
@@ -22,6 +22,22 @@ export default function RecordSaleScreen() {
   const [collection, setCollection] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [bill, setBill] = useState<string | null>(null);
+
+  async function takeBill() {
+    try {
+      const ImagePicker = await import("expo-image-picker");
+      const camera = await ImagePicker.requestCameraPermissionsAsync();
+      if (!camera.granted) {
+        Alert.alert("Camera blocked", "Allow the camera in phone settings to add a bill photo.");
+        return;
+      }
+      const shot = await ImagePicker.launchCameraAsync({ quality: 0.55, allowsEditing: false });
+      if (!shot.canceled && shot.assets[0]) setBill(shot.assets[0].uri);
+    } catch {
+      Alert.alert("Camera", "Could not open the camera. Try again.");
+    }
+  }
 
   async function saveBill(fileUri: string, saleId: number | null, saleJobId: string | null) {
     const kept = await keepPhoto(fileUri, `bill-${localId || saleId || Date.now()}`);
@@ -101,17 +117,19 @@ export default function RecordSaleScreen() {
         }
       }
 
-      const ImagePicker = await import("expo-image-picker").catch(() => null);
-      const camera = ImagePicker ? await ImagePicker.requestCameraPermissionsAsync() : { granted: false };
-      if (ImagePicker && camera.granted) {
-        const shot = await ImagePicker.launchCameraAsync({ quality: 0.55, allowsEditing: false });
-        if (!shot.canceled && shot.assets[0] && (serverSaleId || saleJobId)) {
-          await saveBill(shot.assets[0].uri, serverSaleId, saleJobId);
+      if (bill && (serverSaleId || saleJobId)) {
+        try {
+          await saveBill(bill, serverSaleId, saleJobId);
+        } catch (err) {
+          Alert.alert("Sale saved", `The bill photo did not upload. ${err instanceof Error ? err.message : ""}`.trim());
         }
       }
       if (saleJobId) {
         void offline.flush();
-        Alert.alert("Saved on this phone", "The sale and bill photo will send when the network is back.");
+        Alert.alert(
+          "Saved on this phone",
+          bill ? "The sale and bill photo will send when the network is back." : "The sale will send when the network is back.",
+        );
       }
       router.replace("/visits");
     } catch (err) {
@@ -134,6 +152,14 @@ export default function RecordSaleScreen() {
         placeholder="Optional"
       />
       <Field label="Note" value={note} onChangeText={setNote} multiline placeholder="Optional note" />
+      <Card>
+        <Text style={styles.cardTitle}>Bill photo (optional)</Text>
+        {bill ? <Image source={{ uri: bill }} style={styles.photo} resizeMode="cover" accessibilityLabel="Bill photo" /> : null}
+        <ActionRow>
+          <Button title={bill ? "Retake bill photo" : "Add bill photo"} tone="outline" flex onPress={takeBill} disabled={busy} />
+          {bill ? <Button title="Remove" tone="ghost" flex onPress={() => setBill(null)} disabled={busy} /> : null}
+        </ActionRow>
+      </Card>
       <Button title="Save sale" tone="green" onPress={save} loading={busy} />
       <Text style={styles.hint}>Bill photo is optional. If there is no network, the sale and photo stay on this phone and send later.</Text>
     </Screen>
@@ -142,5 +168,7 @@ export default function RecordSaleScreen() {
 
 const styles = StyleSheet.create({
   shop: { fontSize: 22, fontWeight: "800", color: colors.text },
+  cardTitle: { fontWeight: "800", color: colors.text, fontSize: 16 },
+  photo: { width: "100%", height: 220, borderRadius: 14, backgroundColor: colors.line },
   hint: { ...typo.muted, textAlign: "center" },
 });

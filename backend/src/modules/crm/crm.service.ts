@@ -2,7 +2,7 @@ import { FollowUpType, LeadStatus, Prisma, Temperature } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { geocodeAddress, parseCoord } from "../../lib/geocode.js";
-import { notifyLeadAssigned } from "../../lib/lead-push.js";
+import { notifyLeadAssigned, notifyLeadDecision, notifyLeadForApproval } from "../../lib/lead-push.js";
 import { parseMobile } from "../../lib/phone.js";
 import { customerScope, isAdmin, isManager, leadScope, publicLead } from "./crm.helpers.js";
 import type { RoleCode } from "@prisma/client";
@@ -11,6 +11,11 @@ const leadInclude = {
   assignee: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   followUps: { orderBy: { dueAt: "asc" as const } },
+  visits: {
+    orderBy: { checkedInAt: "desc" as const },
+    take: 1,
+    select: { id: true, status: true, outcome: true, checkedInAt: true },
+  },
 };
 
 function requireApproved(lead: { approvalStatus: string }) {
@@ -224,6 +229,9 @@ export async function createLead(input: {
 
   if (assigneeId && assigneeId !== input.userId) {
     notifyLeadAssigned(assigneeId, { id: lead.id, name: lead.name });
+  }
+  if (approvalStatus === "PENDING") {
+    notifyLeadForApproval(input.tenantId, { id: lead.id, name: lead.name }, lead.createdBy?.name ?? "a salesperson");
   }
 
   return publicLead(lead);
@@ -444,6 +452,10 @@ export async function decideLead(
     },
     include: leadInclude,
   });
+  if (lead.approvalStatus !== decision) {
+    const told = new Set([lead.createdById, lead.assigneeId].filter((item): item is number => item != null && item !== userId));
+    for (const person of told) notifyLeadDecision(person, { id: updated.id, name: updated.name }, decision === "APPROVED");
+  }
   return publicLead(updated);
 }
 

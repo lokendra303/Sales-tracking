@@ -44,6 +44,10 @@ export function publicVisit(row: {
   checkinLat: unknown;
   checkinLng: unknown;
   checkinAccuracy: unknown;
+  checkinDistanceMeters?: number | null;
+  checkoutLat?: unknown;
+  checkoutLng?: unknown;
+  checkoutAccuracy?: unknown;
   distanceMeters: number | null;
   verified: boolean;
   photoPath: string | null;
@@ -58,12 +62,23 @@ export function publicVisit(row: {
   leadId: number | null;
   customerId: number | null;
   beatStopId: number | null;
-  sales?: { id: number }[];
+  sales?: { id: number; billPhotoPath?: string | null }[];
   user?: { id: number; name: string } | null;
   lead?: { id: number; name: string; phone: string; address: string | null; city: string | null; latitude: unknown; longitude: unknown } | null;
   customer?: { id: number; name: string; phone: string; address: string | null; city: string | null; latitude: unknown; longitude: unknown } | null;
 }) {
   const place = row.lead ?? row.customer;
+  const placeLat = asNumber(place?.latitude);
+  const placeLng = asNumber(place?.longitude);
+  const checkinLat = asNumber(row.checkinLat);
+  const checkinLng = asNumber(row.checkinLng);
+  const checkinDistanceMeters =
+    row.checkinDistanceMeters ??
+    (row.status === "IN_PROGRESS"
+      ? row.distanceMeters
+      : checkinLat != null && checkinLng != null && placeLat != null && placeLng != null
+        ? haversineMeters({ lat: checkinLat, lng: checkinLng }, { lat: placeLat, lng: placeLng })
+        : null);
   return {
     id: row.id,
     status: row.status,
@@ -73,17 +88,22 @@ export function publicVisit(row: {
     phone: place?.phone ?? null,
     address: place?.address ?? null,
     city: place?.city ?? null,
-    placeLat: asNumber(place?.latitude),
-    placeLng: asNumber(place?.longitude),
+    placeLat,
+    placeLng,
     leadId: row.leadId,
     customerId: row.customerId,
     beatStopId: row.beatStopId,
     userName: row.user?.name ?? null,
     checkedInAt: row.checkedInAt,
     checkedOutAt: row.checkedOutAt,
-    checkinLat: asNumber(row.checkinLat),
-    checkinLng: asNumber(row.checkinLng),
+    checkinLat,
+    checkinLng,
     checkinAccuracy: asNumber(row.checkinAccuracy),
+    checkinDistanceMeters,
+    checkoutLat: asNumber(row.checkoutLat),
+    checkoutLng: asNumber(row.checkoutLng),
+    checkoutAccuracy: asNumber(row.checkoutAccuracy),
+    finishDistanceMeters: row.status === "COMPLETED" ? row.distanceMeters : null,
     distanceMeters: row.distanceMeters,
     verified: row.verified,
     hasPhoto: Boolean(row.photoPath),
@@ -96,5 +116,6 @@ export function publicVisit(row: {
     saleAmount: asNumber(row.saleAmount),
     collectionAmount: asNumber(row.collectionAmount),
     saleId: row.sales?.[0]?.id ?? null,
+    saleHasBill: Boolean(row.sales?.[0]?.billPhotoPath),
   };
 }

@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Alert, Image, Platform, StyleSheet, Text } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { LiveCamera } from "@/components/live-camera";
+import { ServerPhoto } from "@/components/server-photo";
 import { loadLocation } from "@/lib/device-location";
 import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { api, apiUpload, fetchVisitPhoto, isOfflineError, serverReachable, visitPhotoUri, type Visit } from "@/lib/api";
+import { api, apiUpload, isOfflineError, loadBillPhoto, loadVisitPhoto, serverReachable, type Visit } from "@/lib/api";
 import { assertNearShop, finishReading } from "@/lib/finish-visit";
+import { haversineMeters } from "@/lib/geo";
 import { useOffline } from "@/lib/offline";
 import { keepPhoto } from "@/lib/photos";
 import { openCall, openNavigate, openWhatsApp, when } from "@/lib/format";
@@ -24,8 +26,6 @@ export default function VisitScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [capturing, setCapturing] = useState(false);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-
   const load = useCallback(async () => {
     if (!accessToken || !id) return;
     setLoading(true);
@@ -45,18 +45,6 @@ export default function VisitScreen() {
       load();
     }, [load]),
   );
-
-  useEffect(() => {
-    if (!visit?.hasPhoto || !accessToken) {
-      setPhotoUrl(null);
-      return;
-    }
-    if (Platform.OS === "web") {
-      fetchVisitPhoto(visit.id, accessToken).then(setPhotoUrl).catch(() => setPhotoUrl(null));
-      return;
-    }
-    setPhotoUrl(visitPhotoUri(visit.id, accessToken).uri);
-  }, [accessToken, visit?.hasPhoto, visit?.id, visit?.photoReceivedAt]);
 
   async function saveLivePhoto(fileUri: string) {
     if (!accessToken || !visit) return;
@@ -221,25 +209,46 @@ export default function VisitScreen() {
         tone="outline"
         onPress={() => openNavigate(visit.placeLat, visit.placeLng, [visit.address, visit.city].filter(Boolean).join(", "))}
       />
-      {visit.checkinLat != null && visit.checkinLng != null ? (
-        <Button title="Open check-in GPS" tone="outline" onPress={() => openNavigate(visit.checkinLat, visit.checkinLng)} />
-      ) : null}
-      {visit.photoLat != null && visit.photoLng != null ? (
-        <Button title="Open photo GPS" tone="outline" onPress={() => openNavigate(visit.photoLat, visit.photoLng)} />
-      ) : null}
+      <Card>
+        <Text style={styles.cardTitle}>Locations</Text>
+        <LocationRow
+          label="Check-in"
+          at={visit.checkedInAt}
+          lat={visit.checkinLat}
+          lng={visit.checkinLng}
+          accuracy={visit.checkinAccuracy}
+          distance={visit.checkinDistanceMeters ?? null}
+        />
+        <LocationRow
+          label="Photo"
+          at={visit.photoCapturedAt}
+          lat={visit.photoLat}
+          lng={visit.photoLng}
+          accuracy={visit.photoAccuracy ?? null}
+          distance={
+            visit.photoLat != null && visit.photoLng != null && visit.placeLat != null && visit.placeLng != null
+              ? haversineMeters({ lat: visit.photoLat, lng: visit.photoLng }, { lat: visit.placeLat, lng: visit.placeLng })
+              : null
+          }
+        />
+        <LocationRow
+          label="Finish"
+          at={visit.checkedOutAt}
+          lat={visit.checkoutLat ?? null}
+          lng={visit.checkoutLng ?? null}
+          accuracy={visit.checkoutAccuracy ?? null}
+          distance={visit.finishDistanceMeters ?? null}
+          empty={open ? "Not finished yet" : "Finish GPS was not saved for this older visit"}
+        />
+      </Card>
 
       <Card>
         <Text style={styles.cardTitle}>Place photo</Text>
         {visit.hasPhoto && accessToken ? (
-              <Image
-                source={
-                  Platform.OS === "web"
-                    ? photoUrl
-                      ? { uri: photoUrl }
-                      : undefined
-                    : visitPhotoUri(visit.id, accessToken)
-                }
-                style={styles.photo}
+              <ServerPhoto
+                label="Place photo"
+                photoKey={`visit-${visit.id}-${visit.photoReceivedAt ?? ""}`}
+                load={(fresh) => loadVisitPhoto(visit.id, accessToken, visit.photoReceivedAt, fresh)}
               />
             ) : (
               <Text style={typo.muted}>
@@ -287,6 +296,16 @@ export default function VisitScreen() {
           {visit.managerConfirmedAt ? <Text style={styles.ok}>Manager confirmed</Text> : null}
         </Card>
       ) : null}
+      {!open && visit.saleId && visit.saleHasBill && accessToken ? (
+        <Card>
+          <Text style={styles.cardTitle}>Bill photo</Text>
+          <ServerPhoto
+            label="Bill photo"
+            photoKey={`bill-${visit.saleId}`}
+            load={(fresh) => loadBillPhoto(visit.saleId!, accessToken, fresh)}
+          />
+        </Card>
+      ) : null}
       {manager && !open && visit.outcome === "SUCCESS" && visit.hasPhoto && !visit.managerConfirmedAt ? (
         <Button title="Confirm visit" tone="green" onPress={confirm} loading={busy} />
       ) : null}
@@ -306,11 +325,58 @@ export default function VisitScreen() {
   );
 }
 
+function LocationRow({
+  label,
+  at,
+  lat,
+  lng,
+  accuracy,
+  distance,
+  empty = "No GPS saved",
+}: {
+  label: string;
+  at: string | null;
+  lat: number | null;
+  lng: number | null;
+  accuracy: number | null;
+  distance: number | null;
+  empty?: string;
+}) {
+  const has = lat != null && lng != null;
+  return (
+    <View style={styles.locRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.locLabel}>
+          {label}
+          {at && has ? ` · ${when(at)}` : ""}
+        </Text>
+        <Text style={typo.muted}>
+          {has
+            ? [
+                distance != null ? `${distance} m from shop pin` : "No shop pin to compare",
+                accuracy != null ? `GPS ±${Math.round(accuracy)} m` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : empty}
+        </Text>
+      </View>
+      {has ? (
+        <Pressable onPress={() => openNavigate(lat, lng)} accessibilityLabel={`Open ${label} location on map`}>
+          <Text style={styles.locLink}>Map</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  locRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
+  locLabel: { fontWeight: "800", color: colors.text },
+  locLink: { color: colors.blue, fontWeight: "800", paddingHorizontal: 6, paddingVertical: 4 },
   name: { fontSize: 22, fontWeight: "800", color: colors.text },
   cardTitle: { fontWeight: "800", color: colors.text, fontSize: 16 },
   ok: { color: colors.green, fontWeight: "800" },
   warn: { color: "#92400E", fontWeight: "800" },
-  photo: { width: "100%", height: 220, borderRadius: 14, backgroundColor: colors.line },
   hint: { ...typo.muted, textAlign: "center" },
 });

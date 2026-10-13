@@ -48,7 +48,9 @@ export function publicLead(lead: {
   assignee?: { id: number; name: string } | null;
   createdBy?: { id: number; name: string } | null;
   followUps?: { id: number; type: string; dueAt: Date; doneAt: Date | null; notes: string | null }[];
+  visits?: { id: number; status: string; outcome: string | null; checkedInAt: Date }[];
 }) {
+  const lastVisit = lead.visits?.[0];
   const nextFollowUp = lead.followUps
     ?.filter((item) => !item.doneAt)
     .sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime())[0];
@@ -78,6 +80,9 @@ export function publicLead(lead: {
     createdAt: lead.createdAt,
     nextFollowUp: nextFollowUp
       ? { id: nextFollowUp.id, type: nextFollowUp.type, dueAt: nextFollowUp.dueAt, notes: nextFollowUp.notes }
+      : null,
+    lastVisit: lastVisit
+      ? { id: lastVisit.id, status: lastVisit.status, outcome: lastVisit.outcome, checkedInAt: lastVisit.checkedInAt }
       : null,
   };
 }

@@ -30,7 +30,7 @@
         "android.permission.READ_MEDIA_AUDIO"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#2563EB",
+        "backgroundColor": "#1E3A8A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -80,7 +80,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/android-icon-monochrome.png",
-          "color": "#2563EB",
+          "color": "#1E3A8A",
           "enableBackgroundRemoteNotifications": false
         }
       ]

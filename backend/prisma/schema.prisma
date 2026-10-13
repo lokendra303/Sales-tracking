@@ -377,6 +377,10 @@ model Visit {
   checkinLat         Decimal       @db.Decimal(10, 7)
   checkinLng         Decimal       @db.Decimal(10, 7)
   checkinAccuracy    Decimal?      @db.Decimal(8, 2)
+  checkinDistanceMeters Int?
+  checkoutLat        Decimal?      @db.Decimal(10, 7)
+  checkoutLng        Decimal?      @db.Decimal(10, 7)
+  checkoutAccuracy   Decimal?      @db.Decimal(8, 2)
   distanceMeters     Int?
   verified           Boolean       @default(false)
   photoPath          String?

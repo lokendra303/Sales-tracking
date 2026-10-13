@@ -52,9 +52,25 @@ visitsRouter.get(
 visitsRouter.get(
   "/visits",
   asyncHandler(async (req, res) => {
-    const days = Number(req.query.days ?? 14);
-    const forUserId = req.query.userId ? Number(req.query.userId) : undefined;
-    const data = await visits.listVisits(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, days, forUserId);
+    const query = z
+      .object({
+        days: z.coerce.number().int().min(1).max(366).optional(),
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        status: z.enum(["all", "completed", "missed", "in_progress"]).optional(),
+        userId: z.coerce.number().int().positive().optional(),
+      })
+      .parse(req.query);
+    const data = await visits.listVisits({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId,
+      roles: req.auth!.roles,
+      days: query.days,
+      from: query.from,
+      to: query.to,
+      status: query.status,
+      forUserId: query.userId,
+    });
     res.json({ success: true, data });
   }),
 );
@@ -63,7 +79,7 @@ visitsRouter.post(
   "/visits/preview",
   asyncHandler(async (req, res) => {
     const body = gpsSchema.parse(req.body);
-    const data = await visits.previewCheckin({ tenantId: req.auth!.tenantId, ...body });
+    const data = await visits.previewCheckin({ tenantId: req.auth!.tenantId, userId: req.auth!.userId, ...body });
     res.json({ success: true, data });
   }),
 );

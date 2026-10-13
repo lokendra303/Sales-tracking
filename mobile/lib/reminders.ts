@@ -125,7 +125,11 @@ export async function syncReminders(items: FollowUp[]) {
   }
 }
 
-export async function presentLeadAssigned(leadId: number, name: string) {
+export function presentLeadAssigned(leadId: number, name: string) {
+  return presentLeadAlert(`lead-${leadId}`, leadId, "New lead assigned", name);
+}
+
+export async function presentLeadAlert(identifier: string, leadId: number, title: string, body: string) {
   const Notifications = loadNotifications();
   if (!Notifications) return;
   try {
@@ -134,10 +138,10 @@ export async function presentLeadAssigned(leadId: number, name: string) {
       importance: Notifications.AndroidImportance.HIGH,
     });
     await Notifications.scheduleNotificationAsync({
-      identifier: `lead-${leadId}`,
+      identifier,
       content: {
-        title: "New lead assigned",
-        body: name,
+        title,
+        body,
         data: { leadId },
         sound: "default",
       },

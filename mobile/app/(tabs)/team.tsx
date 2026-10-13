@@ -2,12 +2,12 @@ import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Avatar, Badge, Button, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
+import { Avatar, Badge, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type FieldTeammate } from "@/lib/api";
-import { ageLabel, openNavigate } from "@/lib/format";
+import { ageLabel, openCall, openNavigate } from "@/lib/format";
 import { isAdmin, isManager, roleLabel } from "@/lib/roles";
-import { colors, typo } from "@/lib/theme";
+import { colors, radius, shadow, typo } from "@/lib/theme";
 
 type TeamUser = {
   id: number;
@@ -70,7 +70,7 @@ export default function TeamScreen() {
       header={
         <ScreenHeader
           title={admin ? "Managers" : "Team"}
-          subtitle={admin ? "System admin — managers only" : "Every executive is listed. Open one to review their work."}
+          subtitle={admin ? "System admin — managers only" : "Your sales executives"}
           right={
             <Pressable style={styles.add} onPress={() => router.push("/user/new")} accessibilityLabel={admin ? "Add manager" : "Add sales executive"}>
               <Ionicons name="add" size={22} color="#fff" />
@@ -79,9 +79,21 @@ export default function TeamScreen() {
         />
       }
     >
+      {manager && users.length ? (
+        <View style={styles.summary}>
+          <SummaryCell value={field.filter((row) => row.liveStreaming).length} label="Live" color={colors.green} />
+          <View style={styles.summaryDivider} />
+          <SummaryCell value={field.filter((row) => row.fieldStatus === "ACTIVE").length} label="In field" color={colors.amber} />
+          <View style={styles.summaryDivider} />
+          <SummaryCell value={users.length} label="Executives" color={colors.blue} />
+        </View>
+      ) : null}
       {manager ? (
         <Card>
           <View style={styles.liveRow}>
+            <View style={[styles.liveIcon, { backgroundColor: liveOn ? colors.greenSoft : colors.bg }]}>
+              <Ionicons name="navigate" size={18} color={liveOn ? colors.green : colors.muted} />
+            </View>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.name}>Live location</Text>
               <Text style={typo.muted}>
@@ -101,7 +113,6 @@ export default function TeamScreen() {
               />
             )}
           </View>
-          <Button title="Open visit photos" tone="outline" onPress={() => router.push("/visits")} />
         </Card>
       ) : null}
       {loading ? (
@@ -112,46 +123,57 @@ export default function TeamScreen() {
         users.map((item) => {
           const live = field.find((row) => row.userId === item.id);
           const streaming = Boolean(live?.liveStreaming && live.lastLat != null && live.lastLng != null);
+          const inField = live?.fieldStatus === "ACTIVE";
           return (
             <Card key={item.id}>
               <View style={styles.row}>
-                <Avatar name={item.name} />
+                <View>
+                  <Avatar name={item.name} tone={inField ? "green" : "blue"} />
+                  {manager ? (
+                    <View style={[styles.dot, { backgroundColor: streaming ? colors.green : inField ? colors.amber : "#CBD5E1" }]} />
+                  ) : null}
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  <Text style={typo.muted}>{roleLabel(item.roles)}</Text>
-                  <Text style={typo.muted}>{item.phone}</Text>
-                  {live?.fieldStatus === "ACTIVE" ? (
-                    <Text style={typo.muted}>
-                      In field · {live.durationMinutes} min
-                      {live.liveStreaming ? ` · ${ageLabel(live.lastSeenAgeSeconds)}` : ""}
+                  <Text style={styles.name} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={typo.muted} numberOfLines={1}>
+                    {manager ? item.phone : `${roleLabel(item.roles)} · ${item.phone}`}
+                  </Text>
+                  {inField ? (
+                    <Text style={styles.fieldLine} numberOfLines={1}>
+                      In field · {live!.durationMinutes} min
+                      {live!.liveStreaming ? ` · ${ageLabel(live!.lastSeenAgeSeconds)}` : ""}
                     </Text>
                   ) : null}
                 </View>
                 <Badge
-                  label={streaming ? "Live" : live?.fieldStatus === "ACTIVE" ? "In field" : item.status === "ACTIVE" ? "Active" : "Off"}
-                  tone={streaming || live?.fieldStatus === "ACTIVE" || item.status === "ACTIVE" ? "green" : "red"}
+                  label={streaming ? "Live" : inField ? "In field" : item.status === "ACTIVE" ? "Active" : "Off"}
+                  tone={streaming || inField ? "green" : item.status === "ACTIVE" ? "slate" : "red"}
                 />
               </View>
               {manager ? (
-                <>
-                  <Button
-                    title="See this executive’s leads"
-                    tone="outline"
+                <View style={styles.actions}>
+                  <MiniAction
+                    icon="briefcase-outline"
+                    label="Leads"
                     onPress={() => router.push({ pathname: "/leads", params: { assigneeId: String(item.id) } })}
                   />
-                  <Button
-                    title="See this executive’s visits"
-                    tone="outline"
+                  <MiniAction
+                    icon="camera-outline"
+                    label="Visits"
                     onPress={() => router.push({ pathname: "/visits", params: { userId: String(item.id) } })}
                   />
-                </>
-              ) : null}
-              {streaming ? (
-                <Button
-                  title="Open live location"
-                  tone="green"
-                  onPress={() => openNavigate(live!.lastLat, live!.lastLng, item.name)}
-                />
+                  <MiniAction icon="call-outline" label="Call" onPress={() => openCall(item.phone)} />
+                  {streaming ? (
+                    <MiniAction
+                      icon="navigate"
+                      label="Map"
+                      tone="green"
+                      onPress={() => openNavigate(live!.lastLat, live!.lastLng, item.name)}
+                    />
+                  ) : null}
+                </View>
               ) : null}
             </Card>
           );
@@ -161,9 +183,90 @@ export default function TeamScreen() {
   );
 }
 
+function SummaryCell({ value, label, color }: { value: number; label: string; color: string }) {
+  return (
+    <View style={styles.summaryCell}>
+      <Text style={[styles.summaryValue, { color }]}>{value}</Text>
+      <Text style={styles.summaryLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function MiniAction({
+  icon,
+  label,
+  onPress,
+  tone = "blue",
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  tone?: "blue" | "green";
+}) {
+  const fg = tone === "green" ? colors.green : colors.blue;
+  const bg = tone === "green" ? colors.greenSoft : colors.blueSoft;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.mini, { backgroundColor: bg }, pressed && { opacity: 0.8 }]}
+    >
+      <Ionicons name={icon} size={16} color={fg} />
+      <Text style={[styles.miniText, { color: fg }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  liveRow: { flexDirection: "row", alignItems: "center" },
+  liveRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  liveIcon: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   name: { fontWeight: "800", color: colors.text, fontSize: 16 },
+  fieldLine: { color: colors.green, fontWeight: "700", fontSize: 12, marginTop: 2 },
   add: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" },
+  dot: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 8,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  mini: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    minHeight: 38,
+    borderRadius: radius.pill,
+    paddingHorizontal: 6,
+  },
+  miniText: { fontWeight: "800", fontSize: 12 },
+  summary: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingVertical: 14,
+    ...shadow,
+  },
+  summaryCell: { flex: 1, alignItems: "center", gap: 2 },
+  summaryValue: { fontSize: 22, fontWeight: "800" },
+  summaryLabel: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+  summaryDivider: { width: StyleSheet.hairlineWidth, alignSelf: "stretch", backgroundColor: colors.line },
 });

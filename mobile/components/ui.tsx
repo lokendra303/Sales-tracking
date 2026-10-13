@@ -395,6 +395,108 @@ export function IconRound({
   );
 }
 
+type Tone = "blue" | "green" | "amber" | "red" | "slate";
+
+const tones: Record<Tone, { bg: string; fg: string }> = {
+  blue: { bg: colors.blueSoft, fg: colors.blue },
+  green: { bg: colors.greenSoft, fg: colors.green },
+  amber: { bg: colors.amberSoft, fg: colors.amber },
+  red: { bg: colors.redSoft, fg: colors.red },
+  slate: { bg: "#F1F5F9", fg: colors.muted },
+};
+
+export function TileGrid({ children }: { children: ReactNode }) {
+  return <View style={styles.grid}>{children}</View>;
+}
+
+export function KpiTile({
+  icon,
+  label,
+  value,
+  hint,
+  tone = "blue",
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: Tone;
+  onPress?: () => void;
+}) {
+  const { wide } = useLayout();
+  const palette = tones[tone];
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={`${label}: ${value}`}
+      style={({ pressed }) => [styles.kpi, { flexBasis: wide ? "23%" : "46%" }, pressed && styles.pressed]}
+    >
+      <View style={styles.kpiTop}>
+        <View style={[styles.kpiIcon, { backgroundColor: palette.bg }]}>
+          <Ionicons name={icon} size={18} color={palette.fg} />
+        </View>
+        {onPress ? <Ionicons name="chevron-forward" size={16} color={colors.muted} /> : null}
+      </View>
+      <Text style={styles.kpiValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+        {value}
+      </Text>
+      <Text style={styles.kpiLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      {hint ? (
+        <Text style={[styles.kpiHint, { color: palette.fg }]} numberOfLines={1}>
+          {hint}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+export function ActionTile({
+  icon,
+  label,
+  onPress,
+  tone = "blue",
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  tone?: Tone;
+}) {
+  const palette = tones[tone];
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+    >
+      <View style={[styles.actionIcon, { backgroundColor: palette.bg }]}>
+        <Ionicons name={icon} size={22} color={palette.fg} />
+      </View>
+      <Text style={styles.actionLabel} numberOfLines={2}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+export function SectionTitle({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {action && onAction ? (
+        <Pressable onPress={onAction} hitSlop={10} accessibilityRole="button">
+          <Text style={styles.sectionAction}>{action}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export function SearchBox(props: TextInputProps & { onSubmit?: () => void }) {
   return (
     <View style={styles.search}>
@@ -550,4 +652,38 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 12 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12, width: "100%" },
+  kpi: {
+    flexGrow: 1,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 14,
+    gap: 4,
+    ...shadow,
+  },
+  kpiTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  kpiIcon: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  kpiValue: { fontSize: 24, fontWeight: "800", color: colors.text },
+  kpiLabel: { color: colors.muted, fontSize: 13, fontWeight: "600" },
+  kpiHint: { fontSize: 12, fontWeight: "700" },
+  action: {
+    flex: 1,
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadow,
+  },
+  actionIcon: { width: 46, height: 46, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  actionLabel: { color: colors.text, fontSize: 12, fontWeight: "700", textAlign: "center" },
+  section: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
+  sectionTitle: { fontSize: 17, fontWeight: "800", color: colors.text },
+  sectionAction: { color: colors.blue, fontWeight: "800", fontSize: 13 },
 });

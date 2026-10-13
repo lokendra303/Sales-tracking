@@ -43,6 +43,7 @@ export type Lead = {
   customerId: number | null;
   createdAt: string;
   nextFollowUp: { id: number; type: string; dueAt: string; notes: string | null } | null;
+  lastVisit?: { id: number; status: string; outcome: string | null; checkedInAt: string } | null;
   followUps?: FollowUp[];
   customer?: { id: number; name: string; phone: string } | null;
 };
@@ -91,17 +92,24 @@ export type Visit = {
   checkinLat: number | null;
   checkinLng: number | null;
   checkinAccuracy: number | null;
+  checkinDistanceMeters?: number | null;
+  checkoutLat?: number | null;
+  checkoutLng?: number | null;
+  checkoutAccuracy?: number | null;
+  finishDistanceMeters?: number | null;
   distanceMeters: number | null;
   verified: boolean;
   hasPhoto: boolean;
   photoLat: number | null;
   photoLng: number | null;
+  photoAccuracy?: number | null;
   photoCapturedAt: string | null;
   photoReceivedAt: string | null;
   managerConfirmedAt?: string | null;
   saleAmount?: number | null;
   collectionAmount?: number | null;
   saleId?: number | null;
+  saleHasBill?: boolean;
 };
 
 export type Sale = {
@@ -232,6 +240,7 @@ export type FieldTeammate = {
 };
 
 export type CheckPreview = {
+  doneTodayVisitId?: number | null;
   name: string;
   phone: string | null;
   address: string | null;
@@ -471,15 +480,46 @@ function readUpload<T>(status: number, body: string): T {
   }
 }
 
-export function visitPhotoUri(visitId: number, token: string) {
-  return {
-    uri: `${API_BASE}/visits/${visitId}/photo`,
+async function downloadPhoto(path: string, name: string, token: string, fresh: boolean) {
+  const fs = await import("expo-file-system");
+  const dir = new fs.Directory(fs.Paths.cache, "server-photos");
+  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+  const dest = new fs.File(dir, `${name.replace(/[^0-9a-z-]/gi, "")}.jpg`);
+  if (dest.exists && fresh) dest.delete();
+  else if (dest.exists && dest.size > 0) return dest.uri;
+  const file = await fs.File.downloadFileAsync(`${API_BASE}${path}`, dest, {
     headers: { Authorization: `Bearer ${token}` },
-  };
+    idempotent: true,
+  });
+  return file.uri;
 }
 
-export async function fetchVisitPhoto(visitId: number, token: string) {
-  const response = await fetch(`${API_BASE}/visits/${visitId}/photo`, {
+/** Local file URI for a server photo; the image view itself cannot send the login header reliably. */
+async function loadPhoto(path: string, name: string, token: string, fresh: boolean) {
+  if (Platform.OS === "web") return fetchPhoto(path, token);
+  try {
+    return await downloadPhoto(path, name, token, fresh);
+  } catch {
+    const next = await refreshAccessToken();
+    if (!next.access) return null;
+    try {
+      return await downloadPhoto(path, name, next.access, true);
+    } catch {
+      return null;
+    }
+  }
+}
+
+export function loadVisitPhoto(visitId: number, token: string, version?: string | null, fresh = false) {
+  return loadPhoto(`/visits/${visitId}/photo`, `visit-${visitId}-${version || "0"}`, token, fresh);
+}
+
+export function loadBillPhoto(saleId: number, token: string, fresh = false) {
+  return loadPhoto(`/sales/${saleId}/bill`, `bill-${saleId}`, token, fresh);
+}
+
+async function fetchPhoto(path: string, token: string) {
+  const response = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) return null;

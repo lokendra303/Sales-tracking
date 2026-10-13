@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
+import { leadStage, stageColors } from "@/lib/lead-stage";
 import { ActionRow, Badge, Button, Card, Chip, EmptyState, Field, Screen, ScreenHeader } from "@/components/ui";
 import { mobileDigits } from "@/lib/phone";
 import { useAuth } from "@/lib/auth";
@@ -232,10 +234,16 @@ export default function LeadDetailScreen() {
   }
 
   const temp = tempColor(lead.temperature);
+  const stage = leadStage(lead);
+  const stageTone = stageColors[stage.tone];
 
   return (
     <Screen header={<ScreenHeader title="Lead" back align="center" fallback="/leads" />}>
       <Card>
+        <View style={[styles.stage, { backgroundColor: stageTone.bg }]}>
+          <Ionicons name={stage.icon} size={18} color={stageTone.fg} />
+          <Text style={[styles.stageText, { color: stageTone.fg }]}>{stage.label}</Text>
+        </View>
         <View style={styles.row}>
           <Text style={styles.name} numberOfLines={2}>
             {lead.name}
@@ -472,6 +480,8 @@ export default function LeadDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  stage: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  stageText: { fontWeight: "800", fontSize: 14, flexShrink: 1 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   name: { fontSize: 22, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
   section: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 8 },

@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { router } from "expo-router";
 import { Alert, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
+import { LocationPicker, type PickedPlace } from "@/components/location-picker";
 import { bestFix, loadLocation } from "@/lib/device-location";
-import { Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
+import { ActionRow, Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
+import { colors, radius } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { ApiError, api, isOfflineError } from "@/lib/api";
 import { requestId, useOffline } from "@/lib/offline";
@@ -21,6 +24,8 @@ export default function NewLeadScreen() {
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [pinning, setPinning] = useState(false);
+  const [pinLabel, setPinLabel] = useState<string | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const [notes, setNotes] = useState("");
   const [potential, setPotential] = useState("");
   const [temperature, setTemperature] = useState<"HOT" | "WARM" | "COLD">("WARM");
@@ -41,6 +46,7 @@ export default function NewLeadScreen() {
       }
       const fix = await bestFix(Location);
       setPin({ lat: fix.lat, lng: fix.lng });
+      setPinLabel("Pinned where you are standing");
       if ((fix.accuracy ?? 0) > 50) {
         Alert.alert("Weak GPS", `This pin may be off by about ${Math.round(fix.accuracy!)} m. Step outside the shop and pin again.`);
       }
@@ -49,6 +55,14 @@ export default function NewLeadScreen() {
     } finally {
       setPinning(false);
     }
+  }
+
+  function pickPlace(place: PickedPlace) {
+    setPin({ lat: place.lat, lng: place.lng });
+    setPinLabel(place.label || "Picked on the map");
+    if (!address.trim() && place.address) setAddress(place.address);
+    if (!city.trim() && place.city) setCity(place.city);
+    setMapOpen(false);
   }
 
   async function save(createAnyway = false) {
@@ -129,13 +143,27 @@ export default function NewLeadScreen() {
       <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
       <View style={styles.field}>
         <Text style={styles.label}>Shop location</Text>
-        <Text style={styles.hint}>
-          {pin
-            ? `Pin saved ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}. The executive will follow this map.`
-            : "Stand at the shop and pin it, or type the address. The map opens from this lead."}
-        </Text>
-        <Button title={pin ? "Update pin" : "Pin shop on map"} tone="outline" onPress={pinShop} loading={pinning} />
+        {pin ? (
+          <View style={styles.pinCard}>
+            <Ionicons name="location" size={20} color={colors.green} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.pinTitle} numberOfLines={2}>
+                {pinLabel}
+              </Text>
+              <Text style={styles.hint}>
+                {pin.lat.toFixed(5)}, {pin.lng.toFixed(5)}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.hint}>Pick the shop on the map, or stand at the shop and use your GPS.</Text>
+        )}
+        <ActionRow>
+          <Button title={pin ? "Change on map" : "Pick on map"} icon="map-outline" onPress={() => setMapOpen(true)} flex />
+          <Button title="Use my GPS here" icon="locate-outline" tone="outline" onPress={pinShop} loading={pinning} flex />
+        </ActionRow>
       </View>
+      <LocationPicker visible={mapOpen} initial={pin} onClose={() => setMapOpen(false)} onPick={pickPlace} />
       <Field label="Potential ₹" value={potential} onChangeText={setPotential} keyboardType="numeric" placeholder="Expected value" />
       <View style={styles.field}>
         <Text style={styles.label}>Temperature</Text>
@@ -167,4 +195,15 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, fontWeight: "700", color: "#0F172A" },
   temps: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   hint: { fontSize: 13, color: "#64748B" },
+  pinCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.greenSoft,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    padding: 12,
+  },
+  pinTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
 });

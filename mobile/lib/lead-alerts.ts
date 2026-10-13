@@ -1,6 +1,6 @@
 import { api, type Lead } from "./api";
 import { persistGet, persistSet } from "./persist";
-import { presentLeadAssigned } from "./reminders";
+import { presentLeadAlert, presentLeadAssigned } from "./reminders";
 
 type NotificationsModule = typeof import("expo-notifications");
 type ExtraConfig = { remotePush?: boolean; eas?: { projectId?: string } };
@@ -8,6 +8,9 @@ type ExtraConfig = { remotePush?: boolean; eas?: { projectId?: string } };
 const seenKey = "seen-lead-ids";
 const readyKey = "seen-leads-ready";
 const remoteKey = "remote-push-user";
+const myPendingKey = "my-pending-lead-ids";
+const pendingSeenKey = "seen-pending-ids";
+const pendingReadyKey = "seen-pending-ready";
 
 function notifications(): NotificationsModule | null {
   try {
@@ -29,9 +32,9 @@ function appExtra(): ExtraConfig {
   }
 }
 
-async function readSeen() {
+async function readIds(key: string) {
   try {
-    const raw = await persistGet(seenKey);
+    const raw = await persistGet(key);
     const ids = raw ? (JSON.parse(raw) as number[]) : [];
     return new Set(ids.filter((id) => Number.isFinite(id)));
   } catch {
@@ -39,36 +42,61 @@ async function readSeen() {
   }
 }
 
-async function writeSeen(ids: Set<number>) {
-  await persistSet(seenKey, JSON.stringify([...ids].slice(-300)));
+async function writeIds(key: string, ids: Set<number>) {
+  await persistSet(key, JSON.stringify([...ids].slice(-300)));
 }
 
 export async function markLeadSeen(leadId: number) {
-  const seen = await readSeen();
+  const seen = await readIds(seenKey);
   seen.add(leadId);
-  await writeSeen(seen);
+  await writeIds(seenKey, seen);
+}
+
+/** First run on a phone, or push already active for this user: remember what exists, show nothing. */
+async function quietRun(readyFlag: string, userId: number) {
+  const ready = (await persistGet(readyFlag)) === "1";
+  const remote = (await persistGet(remoteKey)) === String(userId);
+  if (!ready) await persistSet(readyFlag, "1");
+  return !ready || remote;
 }
 
 export async function watchAssignedLeads(token: string, userId: number, userName: string) {
   const data = await api<{ leads: Lead[] }>("/leads?filter=all", { token });
-  const mine = data.leads.filter((lead) => lead.assigneeId && !(lead.source === "MANUAL" && lead.createdByName === userName));
-  const seen = await readSeen();
-
-  const ready = (await persistGet(readyKey)) === "1";
-  const remote = (await persistGet(remoteKey)) === String(userId);
-  if (!ready || remote) {
-    for (const lead of mine) seen.add(lead.id);
-    await writeSeen(seen);
-    await persistSet(readyKey, "1");
-    return;
-  }
+  const ownAdded = (lead: Lead) => lead.source === "MANUAL" && lead.createdByName === userName;
+  const mine = data.leads.filter((lead) => lead.assigneeId && !ownAdded(lead));
+  const seen = await readIds(seenKey);
+  const waiting = await readIds(myPendingKey);
+  const nowWaiting = new Set(data.leads.filter((lead) => ownAdded(lead) && lead.approvalStatus === "PENDING").map((lead) => lead.id));
+  const quiet = await quietRun(readyKey, userId);
 
   for (const lead of mine) {
     if (seen.has(lead.id)) continue;
     seen.add(lead.id);
-    await presentLeadAssigned(lead.id, lead.name);
+    if (!quiet) await presentLeadAssigned(lead.id, lead.name);
   }
-  await writeSeen(seen);
+  for (const lead of data.leads) {
+    if (!quiet && waiting.has(lead.id) && lead.approvalStatus === "APPROVED") {
+      await presentLeadAlert(`approved-${lead.id}`, lead.id, "Lead approved", `${lead.name} · you can visit it now`);
+    }
+  }
+  await writeIds(seenKey, seen);
+  await writeIds(myPendingKey, nowWaiting);
+}
+
+export async function watchPendingLeads(token: string, userId: number) {
+  const data = await api<{ leads: Lead[] }>("/leads?filter=pending", { token });
+  const pending = data.leads.filter((lead) => lead.approvalStatus === "PENDING");
+  const seen = await readIds(pendingSeenKey);
+  const quiet = await quietRun(pendingReadyKey, userId);
+  for (const lead of pending) {
+    if (seen.has(lead.id)) continue;
+    seen.add(lead.id);
+    if (!quiet) {
+      const from = lead.createdByName ? ` · added by ${lead.createdByName}` : "";
+      await presentLeadAlert(`approval-${lead.id}`, lead.id, "Lead needs approval", `${lead.name}${from}`);
+    }
+  }
+  await writeIds(pendingSeenKey, seen);
 }
 
 export function listenLeadPushes() {
