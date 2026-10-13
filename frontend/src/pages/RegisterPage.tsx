@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { PasswordField } from "../components/PasswordField";
+import { api } from "../lib/api";
 import { mobileDigits } from "../lib/phone";
 
 export function RegisterPage() {
