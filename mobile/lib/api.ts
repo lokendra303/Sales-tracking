@@ -2,11 +2,7 @@ import { persistGet, persistSet } from "./persist";
 import { getItem, removeItem, setItem } from "./storage";
 
 function defaultBase() {
-  const fromEnv = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/$/, "");
-  if (!fromEnv) {
-    throw new Error("Set EXPO_PUBLIC_API_URL in mobile/.env");
-  }
-  return fromEnv;
+  return process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/$/, "") || "";
 }
 
 export const API_BASE = defaultBase();

@@ -8,13 +8,23 @@
     "scheme": "salestrack",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.salestrack.app"
     },
     "android": {
       "package": "com.salestrack.app",
       "softwareKeyboardLayoutMode": "resize",
       "usesCleartextTraffic": true,
-      "permissions": ["POST_NOTIFICATIONS", "CAMERA"],
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#2563EB",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -70,6 +80,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9c68100e-aa18-488d-8448-1aeb3ab52a27"
+      }
     }
   }
 }
