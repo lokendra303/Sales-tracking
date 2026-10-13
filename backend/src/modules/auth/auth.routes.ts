@@ -2,7 +2,7 @@ import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
-import { changePasswordSchema, loginSchema, refreshSchema, registerSchema, setPasswordSchema } from "./auth.schema.js";
+import { changePasswordSchema, loginSchema, refreshSchema, registerOtpSchema, registerSchema, setPasswordSchema } from "./auth.schema.js";
 import * as authService from "./auth.service.js";
 
 export const authRouter = Router();
@@ -14,6 +14,24 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, error: { code: "RATE_LIMIT", message: "Too many login attempts. Try later." } },
 });
+
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { success: false, error: { code: "RATE_LIMIT", message: "Too many code requests. Try later." } },
+});
+
+authRouter.post(
+  "/register/otp",
+  otpLimiter,
+  asyncHandler(async (req, res) => {
+    const body = registerOtpSchema.parse(req.body);
+    const data = await authService.sendRegisterOtp(body.email);
+    res.json({ success: true, data });
+  }),
+);
 
 authRouter.post(
   "/register",

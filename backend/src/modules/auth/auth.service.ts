@@ -1,8 +1,23 @@
+import { timingSafeEqual, randomInt } from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
 import { createRefreshTokenValue, hashPassword, hashToken, verifyPassword } from "../../lib/hash.js";
+import { sendMail } from "../../lib/mail.js";
 import { refreshExpiry, signAccessToken } from "../../lib/tokens.js";
 import { badRequest, forbidden, unauthorized } from "../../lib/errors.js";
 import type { RoleCode } from "@prisma/client";
+
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_RESEND_MS = 60 * 1000;
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function codesMatch(storedHash: string, given: string) {
+  const left = Buffer.from(storedHash);
+  const right = Buffer.from(hashToken(given));
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 function publicUser(user: {
   id: number;
@@ -216,17 +231,86 @@ function slugify(name: string) {
     .slice(0, 40) || "company";
 }
 
+export async function sendRegisterOtp(emailRaw: string) {
+  const email = normalizeEmail(emailRaw);
+  const taken = await prisma.user.findFirst({ where: { email } });
+  if (taken) throw badRequest("This email is already registered.");
+
+  const latest = await prisma.emailOtp.findFirst({
+    where: { email, purpose: "register" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (latest && Date.now() - latest.createdAt.getTime() < OTP_RESEND_MS) {
+    throw badRequest("Wait a minute before requesting another code.");
+  }
+
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const sent = await prisma.emailOtp.count({
+    where: { email, purpose: "register", createdAt: { gte: hourAgo } },
+  });
+  if (sent >= 5) throw badRequest("Too many codes sent. Try again later.");
+
+  const code = String(randomInt(100000, 1000000));
+  await prisma.emailOtp.create({
+    data: {
+      email,
+      purpose: "register",
+      codeHash: hashToken(code),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+    },
+  });
+
+  try {
+    await sendMail(
+      email,
+      "Your SalesTrack registration code",
+      `Your SalesTrack registration code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`,
+    );
+  } catch (error) {
+    await prisma.emailOtp.deleteMany({
+      where: { email, purpose: "register", consumedAt: null, codeHash: hashToken(code) },
+    });
+    console.error(error);
+    throw badRequest("Could not send the code. Check the email address and try again.");
+  }
+
+  return { sent: true, message: "Code sent. It expires in 10 minutes." };
+}
+
+async function consumeRegisterOtp(email: string, otp: string) {
+  const row = await prisma.emailOtp.findFirst({
+    where: { email, purpose: "register", consumedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!row) throw badRequest("Request a new code. This one is missing or expired.");
+  if (row.attempts >= 5) throw badRequest("Too many wrong codes. Request a new one.");
+  if (!codesMatch(row.codeHash, otp.trim())) {
+    await prisma.emailOtp.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } });
+    throw badRequest("That code is wrong.");
+  }
+  const used = await prisma.emailOtp.updateMany({
+    where: { id: row.id, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+  if (used.count !== 1) throw badRequest("Request a new code.");
+}
+
 export async function register(input: {
   companyName: string;
   name: string;
   phone: string;
   password: string;
-  email?: string;
+  email: string;
+  otp: string;
 }) {
   const phone = input.phone.replace(/\D/g, "");
+  const email = normalizeEmail(input.email);
   if (phone.length < 8) throw badRequest("Enter a valid mobile number.");
-  const taken = await prisma.user.findFirst({ where: { phone } });
-  if (taken) throw badRequest("This mobile number is already registered.");
+  const takenPhone = await prisma.user.findFirst({ where: { phone } });
+  if (takenPhone) throw badRequest("This mobile number is already registered.");
+  const takenEmail = await prisma.user.findFirst({ where: { email } });
+  if (takenEmail) throw badRequest("This email is already registered.");
+  await consumeRegisterOtp(email, input.otp);
 
   let slug = slugify(input.companyName);
   let n = 2;
@@ -261,7 +345,7 @@ export async function register(input: {
       tenantId: tenant.id,
       name: input.name.trim(),
       phone,
-      email: input.email || null,
+      email,
       passwordHash: await hashPassword(input.password),
       status: "DISABLED",
       roles: { create: { roleId: managerRole.id } },

@@ -186,6 +186,20 @@ model RefreshToken {
   @@map("refreshtoken")
 }
 
+model EmailOtp {
+  id         Int       @id @default(autoincrement())
+  email      String
+  purpose    String    @default("register")
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([email, purpose, createdAt])
+  @@map("emailotp")
+}
+
 enum LeadStatus {
   NEW
   ASSIGNED

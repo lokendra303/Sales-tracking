@@ -45,7 +45,12 @@ export function ExecFilter({
 }) {
   if (!people.length && !includeUnassigned) return null;
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.scroller}
+      contentContainerStyle={styles.row}
+    >
       <Chip label="All executives" on={value === "all"} onPress={() => onChange("all")} />
       {includeUnassigned ? (
         <Chip label="Unassigned" on={value === "unassigned"} onPress={() => onChange("unassigned")} />
@@ -77,6 +82,7 @@ export function ExecPicker({
 }
 
 const styles = StyleSheet.create({
-  row: { gap: 8, paddingRight: 8 },
-  wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  scroller: { flexGrow: 0, flexShrink: 0 },
+  row: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 8 },
+  wrap: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
 });

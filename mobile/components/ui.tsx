@@ -483,6 +483,7 @@ const styles = StyleSheet.create({
   btnInner: { flexDirection: "row", alignItems: "center", gap: 8 },
   btnText: { fontWeight: "800", fontSize: 15 },
   chip: {
+    alignSelf: "flex-start",
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: radius.pill,

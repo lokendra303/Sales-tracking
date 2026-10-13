@@ -6,11 +6,32 @@ import { api } from "../lib/api";
 export function RegisterPage() {
   const [companyName, setCompanyName] = useState("");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [codeSent, setCodeSent] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
+  const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  async function sendCode() {
+    setError("");
+    setCodeSent("");
+    setSending(true);
+    try {
+      const data = await api<{ message: string }>("/auth/register/otp", {
+        method: "POST",
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setCodeSent(data.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the code.");
+    } finally {
+      setSending(false);
+    }
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -19,7 +40,7 @@ export function RegisterPage() {
     try {
       const data = await api<{ message: string }>("/auth/register", {
         method: "POST",
-        body: JSON.stringify({ companyName, name, phone, password }),
+        body: JSON.stringify({ companyName, name, email: email.trim(), phone, password, otp }),
       });
       setDone(data.message);
     } catch (err) {
@@ -38,7 +59,7 @@ export function RegisterPage() {
             New company
           </p>
           <h1>Register your desk</h1>
-          <p>Create a company as the manager. The system admin approves it. Then you add salespeople and give them phone logins.</p>
+          <p>Create a company as the manager. We email a 6-digit code to confirm the address. The system admin approves it. Then you add salespeople and give them phone logins.</p>
         </div>
         <p className="small">One backend. This portal for the desk. The app for the field.</p>
       </section>
@@ -59,10 +80,23 @@ export function RegisterPage() {
               <h2>Company + manager</h2>
               <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Company name" required />
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name (manager)" required />
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" required autoComplete="username" />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Work email" type="email" required autoComplete="email" />
+              <button className="btn blue" type="button" disabled={sending || !email.trim()} onClick={() => void sendCode()}>
+                {sending ? "Sending code…" : "Send email code"}
+              </button>
+              {codeSent ? <p className="muted small">{codeSent}</p> : null}
+              <input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="6-digit email code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+              />
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number (used to sign in)" required autoComplete="username" />
               <PasswordField value={password} onChange={setPassword} required autoComplete="new-password" />
               {error ? <p className="error">{error}</p> : null}
-              <button className="btn blue" disabled={loading}>
+              <button className="btn blue" disabled={loading || otp.length !== 6}>
                 {loading ? "Sending…" : "Request access"}
               </button>
               <p className="muted small">

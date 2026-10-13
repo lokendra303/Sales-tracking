@@ -36,10 +36,15 @@ export const changePasswordSchema = z
     path: ["newPassword"],
   });
 
+export const registerOtpSchema = z.object({
+  email: z.string().trim().email("Enter a valid email address."),
+});
+
 export const registerSchema = z.object({
   companyName: z.string().min(2, "Enter the company name."),
   name: z.string().min(2, "Enter the manager name."),
   phone: z.string().min(8, "Enter a mobile number."),
+  email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(6, "Password must be at least 6 characters."),
-  email: z.string().email().optional().or(z.literal("")),
+  otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit code from your email."),
 });
