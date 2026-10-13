@@ -4,6 +4,7 @@ import { ExecFilter, useExecutives, type ExecValue } from "../components/ExecFil
 import { MapView } from "../components/MapView";
 import { api, apiForm } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { mobileDigits } from "../lib/phone";
 
 type Lead = {
   id: number;
@@ -245,7 +246,7 @@ export function LeadsPage() {
             </label>
             <label>
               Phone *
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" required />
+              <input value={phone} onChange={(e) => setPhone(mobileDigits(e.target.value))} placeholder="10-digit mobile" inputMode="numeric" autoComplete="tel" required />
             </label>
             <label>
               Contact person

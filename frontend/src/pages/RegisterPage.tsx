@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { PasswordField } from "../components/PasswordField";
-import { api } from "../lib/api";
+import { mobileDigits } from "../lib/phone";
 
 export function RegisterPage() {
   const [companyName, setCompanyName] = useState("");
@@ -93,7 +93,14 @@ export function RegisterPage() {
                 autoComplete="one-time-code"
                 required
               />
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number (used to sign in)" required autoComplete="username" />
+              <input
+                value={phone}
+                onChange={(e) => setPhone(mobileDigits(e.target.value))}
+                placeholder="10-digit mobile number"
+                inputMode="numeric"
+                autoComplete="tel"
+                required
+              />
               <PasswordField value={password} onChange={setPassword} required autoComplete="new-password" />
               {error ? <p className="error">{error}</p> : null}
               <button className="btn blue" disabled={loading || otp.length !== 6}>

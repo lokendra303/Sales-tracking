@@ -52,7 +52,8 @@ export default function LoginScreen() {
         <Field
           label="Mobile number"
           placeholder="10-digit mobile"
-          keyboardType="phone-pad"
+          keyboardType="number-pad"
+          digitsOnly
           value={phone}
           onChangeText={setPhone}
           autoComplete="tel"

@@ -44,7 +44,8 @@ export default function NewUserScreen() {
         label="Phone *"
         value={phone}
         onChangeText={setPhone}
-        keyboardType="phone-pad"
+        keyboardType="number-pad"
+        digitsOnly
         placeholder="10-digit mobile"
         autoCapitalize="none"
       />

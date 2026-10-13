@@ -4,6 +4,7 @@ import { PasswordField } from "../components/PasswordField";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { roleLabel } from "../lib/roles";
+import { mobileDigits } from "../lib/phone";
 
 type Person = { id: number; name: string; phone: string; status: string; roles: string[] };
 
@@ -51,7 +52,7 @@ export function TeamPage() {
 
       <form className="card form row-form" onSubmit={add}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required />
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" required />
+        <input value={phone} onChange={(e) => setPhone(mobileDigits(e.target.value))} placeholder="10-digit mobile number" inputMode="numeric" autoComplete="tel" required />
         <PasswordField value={password} onChange={setPassword} required autoComplete="new-password" />
         <button className="btn green">Add salesperson</button>
       </form>

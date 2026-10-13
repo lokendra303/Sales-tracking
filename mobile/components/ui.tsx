@@ -21,6 +21,7 @@ import { type Href } from "expo-router";
 import { useLayout } from "@/lib/layout";
 import { goBack } from "@/lib/nav";
 import { colors, radius, shadow, typo } from "@/lib/theme";
+import { mobileDigits } from "@/lib/phone";
 
 type ScreenProps = {
   children: ReactNode;
@@ -187,8 +188,10 @@ export function Field({
   label,
   right,
   multiline,
+  digitsOnly,
+  onChangeText,
   ...props
-}: TextInputProps & { label?: string; right?: ReactNode; multiline?: boolean }) {
+}: TextInputProps & { label?: string; right?: ReactNode; multiline?: boolean; digitsOnly?: boolean }) {
   return (
     <View style={styles.field}>
       {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
@@ -196,7 +199,11 @@ export function Field({
         <TextInput
           {...props}
           multiline={multiline}
+          keyboardType={digitsOnly ? "number-pad" : props.keyboardType}
+          inputMode={digitsOnly ? "numeric" : props.inputMode}
+          autoComplete={digitsOnly ? "tel" : props.autoComplete}
           placeholderTextColor={colors.muted}
+          onChangeText={(text) => onChangeText?.(digitsOnly ? mobileDigits(text) : text)}
           style={[styles.input, multiline && styles.inputTall, right ? styles.inputWithIcon : null, props.style]}
         />
         {right ? <View style={styles.inputIcon}>{right}</View> : null}

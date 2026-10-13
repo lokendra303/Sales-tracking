@@ -114,7 +114,7 @@ export default function NewLeadScreen() {
   return (
     <Screen keyboard header={<ScreenHeader title="Add lead" back align="center" fallback="/leads" />}>
       <Field label="Business name *" value={name} onChangeText={setName} placeholder="Shop or company" />
-      <Field label="Phone *" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="10-digit mobile" />
+      <Field label="Phone *" value={phone} onChangeText={setPhone} digitsOnly keyboardType="number-pad" placeholder="10-digit mobile" autoCapitalize="none" />
       <Field label="Contact person" value={contactPerson} onChangeText={setContactPerson} placeholder="Who you meet" />
       <Field label="Business type" value={businessType} onChangeText={setBusinessType} placeholder="Retail, distributor…" />
       <Field label="Address" value={address} onChangeText={setAddress} placeholder="Street, area" />

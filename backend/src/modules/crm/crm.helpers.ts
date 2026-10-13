@@ -25,10 +25,6 @@ export function customerScope(tenantId: number, userId: number, roles: RoleCode[
   };
 }
 
-export function digits(phone: string) {
-  return phone.replace(/\D/g, "");
-}
-
 export function publicLead(lead: {
   id: number;
   name: string;

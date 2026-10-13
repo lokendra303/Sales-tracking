@@ -5,6 +5,7 @@ import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { badRequest, forbidden } from "../../lib/errors.js";
 import { hashPassword } from "../../lib/hash.js";
+import { mobileSchema } from "../auth/auth.schema.js";
 import { RoleCode } from "@prisma/client";
 
 export const usersRouter = Router();
@@ -48,7 +49,7 @@ usersRouter.get(
 
 const createUserSchema = z.object({
   name: z.string().min(2),
-  phone: z.string().min(8),
+  phone: mobileSchema,
   email: z.string().email().optional(),
   password: z.string().min(6),
   role: z.enum(["MANAGER", "SALES_EXECUTIVE"]).optional(),

@@ -8,6 +8,7 @@ import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { geocodeAddress } from "../../lib/geocode.js";
 import { badRequest, forbidden } from "../../lib/errors.js";
 import * as crm from "./crm.service.js";
+import { mobileSchema } from "../auth/auth.schema.js";
 
 const importUpload = multer({
   storage: multer.memoryStorage(),
@@ -39,7 +40,7 @@ crmRouter.use((req, _res, next) => {
 
 const createLeadSchema = z.object({
   name: z.string().min(2, "Enter the business name."),
-  phone: z.string().min(8, "Enter a mobile number."),
+  phone: mobileSchema,
   contactPerson: z.string().optional(),
   businessType: z.string().optional(),
   address: z.string().optional(),

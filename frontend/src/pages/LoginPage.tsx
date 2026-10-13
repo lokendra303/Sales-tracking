@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PasswordField } from "../components/PasswordField";
 import { useAuth } from "../lib/auth";
+import { mobileDigits } from "../lib/phone";
 
 export function LoginPage({ blocked = false }: { blocked?: boolean }) {
   const { login, logout, user } = useAuth();
@@ -60,7 +61,13 @@ export function LoginPage({ blocked = false }: { blocked?: boolean }) {
             <>
               <p className="kicker">Sign in</p>
               <h2>Open the desk</h2>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Mobile number" autoComplete="username" />
+              <input
+                value={phone}
+                onChange={(e) => setPhone(mobileDigits(e.target.value))}
+                placeholder="10-digit mobile number"
+                inputMode="numeric"
+                autoComplete="tel"
+              />
               <PasswordField value={password} onChange={setPassword} />
               {error ? <p className="error">{error}</p> : null}
               <button className="btn blue" disabled={loading}>

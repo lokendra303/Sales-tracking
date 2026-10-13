@@ -2,7 +2,8 @@ import { FollowUpType, LeadStatus, Prisma, Temperature } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { geocodeAddress, parseCoord } from "../../lib/geocode.js";
-import { customerScope, digits, isAdmin, isManager, leadScope, publicLead } from "./crm.helpers.js";
+import { parseMobile } from "../../lib/phone.js";
+import { customerScope, isAdmin, isManager, leadScope, publicLead } from "./crm.helpers.js";
 import type { RoleCode } from "@prisma/client";
 
 const leadInclude = {
@@ -144,10 +145,8 @@ export async function createLead(input: {
     if (replay) return publicLead(replay);
   }
 
-  const phone = digits(input.phone);
-  if (phone.length < 8) {
-    throw badRequest("Enter a valid mobile number.");
-  }
+  const phone = parseMobile(input.phone);
+  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: input.tenantId } });
   const existingLead = await prisma.lead.findFirst({
@@ -257,9 +256,15 @@ export async function importLeads(input: {
 
   for (const [index, raw] of input.rows.entries()) {
     const name = cell(raw, ["name", "shop", "shopname", "business", "businessname"]);
-    const phone = digits(cell(raw, ["phone", "mobile", "mobilenumber", "contact"]));
-    if (!name || phone.length < 8) {
-      skipped.push({ row: index + 2, name, phone, reason: "Need a shop name and mobile number." });
+    const rawPhone = cell(raw, ["phone", "mobile", "mobilenumber", "contact"]);
+    const phone = parseMobile(rawPhone);
+    if (!name || !phone) {
+      skipped.push({
+        row: index + 2,
+        name,
+        phone: rawPhone,
+        reason: "Enter a 10-digit mobile number.",
+      });
       continue;
     }
 
@@ -273,7 +278,7 @@ export async function importLeads(input: {
     const assigneeHint = cell(raw, ["assignee", "assigneephone", "executive", "salesperson", "owner"]);
     const assignee = people.find(
       (person) =>
-        person.phone === digits(assigneeHint) ||
+        person.phone === parseMobile(assigneeHint) ||
         person.name.toLowerCase() === assigneeHint.toLowerCase(),
     );
     const potentialRaw = cell(raw, ["potential", "value", "amount"]);

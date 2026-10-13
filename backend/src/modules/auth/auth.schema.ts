@@ -1,7 +1,19 @@
 import { z } from "zod";
+import { parseMobile } from "../../lib/phone.js";
+
+const mobileMessage = "Enter a 10-digit mobile number.";
+
+export const mobileSchema = z.string().trim().transform((value, ctx) => {
+  const phone = parseMobile(value);
+  if (!phone) {
+    ctx.addIssue({ code: "custom", message: mobileMessage });
+    return z.NEVER;
+  }
+  return phone;
+});
 
 export const loginSchema = z.object({
-  phone: z.string().min(8, "Enter a valid mobile number."),
+  phone: mobileSchema,
   password: z.string().min(1, "Enter your password."),
   device: z
     .object({
@@ -43,7 +55,7 @@ export const registerOtpSchema = z.object({
 export const registerSchema = z.object({
   companyName: z.string().min(2, "Enter the company name."),
   name: z.string().min(2, "Enter the manager name."),
-  phone: z.string().min(8, "Enter a mobile number."),
+  phone: mobileSchema,
   email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(6, "Password must be at least 6 characters."),
   otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit code from your email."),

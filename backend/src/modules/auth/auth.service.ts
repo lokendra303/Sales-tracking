@@ -4,6 +4,7 @@ import { createRefreshTokenValue, hashPassword, hashToken, verifyPassword } from
 import { sendMail } from "../../lib/mail.js";
 import { refreshExpiry, signAccessToken } from "../../lib/tokens.js";
 import { badRequest, forbidden, unauthorized } from "../../lib/errors.js";
+import { parseMobile } from "../../lib/phone.js";
 import type { RoleCode } from "@prisma/client";
 
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -74,7 +75,8 @@ export async function login(input: {
   password: string;
   device?: { deviceUid: string; platform: string; appVersion?: string };
 }) {
-  const phone = input.phone.replace(/\D/g, "") || input.phone.trim();
+  const phone = parseMobile(input.phone);
+  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
   const user = await prisma.user.findFirst({
     where: { phone },
     include: userInclude,
@@ -303,9 +305,9 @@ export async function register(input: {
   email: string;
   otp: string;
 }) {
-  const phone = input.phone.replace(/\D/g, "");
+  const phone = parseMobile(input.phone);
   const email = normalizeEmail(input.email);
-  if (phone.length < 8) throw badRequest("Enter a valid mobile number.");
+  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
   const takenPhone = await prisma.user.findFirst({ where: { phone } });
   if (takenPhone) throw badRequest("This mobile number is already registered.");
   const takenEmail = await prisma.user.findFirst({ where: { email } });
