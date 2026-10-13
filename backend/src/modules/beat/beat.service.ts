@@ -1,6 +1,7 @@
 import type { RoleCode } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
+import { notifyLeadAssigned } from "../../lib/lead-push.js";
 import { isManager } from "../crm/crm.helpers.js";
 import { isoDay, movePlannedTo, parseDay, plannedAtFor, publicStop } from "./beat.helpers.js";
 
@@ -125,6 +126,7 @@ export async function addStop(input: {
         where: { id: lead.id },
         data: { assigneeId: user.id, status: lead.status === "NEW" ? "ASSIGNED" : lead.status },
       });
+      notifyLeadAssigned(user.id, { id: lead.id, name: lead.name });
     }
   }
   if (input.customerId) {

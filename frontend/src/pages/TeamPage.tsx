@@ -59,6 +59,7 @@ export function TeamPage() {
       {error ? <p className="error">{error}</p> : null}
       {issued ? <p className="on">{issued}</p> : null}
 
+      <div className="table-scroll">
       <table className="table">
         <thead>
           <tr>
@@ -87,6 +88,7 @@ export function TeamPage() {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

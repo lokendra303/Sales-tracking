@@ -1,16 +1,28 @@
-import * as Notifications from "expo-notifications";
 import type { FollowUp } from "./api";
 import { persistGet, persistSet } from "./persist";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+type NotificationsModule = typeof import("expo-notifications");
+
+let notifications: NotificationsModule | null | undefined;
+
+function loadNotifications() {
+  if (notifications !== undefined) return notifications;
+  try {
+    const mod = require("expo-notifications") as NotificationsModule;
+    mod.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+    notifications = mod;
+  } catch {
+    notifications = null;
+  }
+  return notifications;
+}
 
 function identifierFor(id: number) {
   return `follow-${id}`;
@@ -31,74 +43,125 @@ async function writeOverdueFired(ids: Set<string>) {
 }
 
 export async function ensureReminderPermission() {
-  await Notifications.setNotificationChannelAsync("follow-ups", {
-    name: "Follow-ups",
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 180, 120, 180],
-  });
-  const current = await Notifications.getPermissionsAsync();
-  if (current.granted) return true;
-  const next = await Notifications.requestPermissionsAsync();
-  return next.granted;
+  const Notifications = loadNotifications();
+  if (!Notifications) return false;
+  try {
+    await Notifications.setNotificationChannelAsync("follow-ups", {
+      name: "Follow-ups",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 180, 120, 180],
+    });
+    const current = await Notifications.getPermissionsAsync();
+    if (current.granted) return true;
+    const next = await Notifications.requestPermissionsAsync();
+    return next.granted;
+  } catch {
+    return false;
+  }
 }
 
 export async function cancelAllReminders() {
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  const Notifications = loadNotifications();
+  if (!Notifications) return;
+  try {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+  } catch {
+    // Notifications are optional.
+  }
 }
 
 export async function syncReminders(items: FollowUp[]) {
-  const allowed = await ensureReminderPermission();
-  if (!allowed) return 0;
+  const Notifications = loadNotifications();
+  if (!Notifications) return 0;
+  try {
+    const allowed = await ensureReminderPermission();
+    if (!allowed) return 0;
 
-  const open = items.filter((item) => !item.doneAt);
-  const keep = new Set(open.map((item) => identifierFor(item.id)));
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  for (const item of scheduled) {
-    if (item.identifier.startsWith("follow-") && !keep.has(item.identifier)) {
-      await Notifications.cancelScheduledNotificationAsync(item.identifier);
+    const open = items.filter((item) => !item.doneAt);
+    const keep = new Set(open.map((item) => identifierFor(item.id)));
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const item of scheduled) {
+      if (item.identifier.startsWith("follow-") && !keep.has(item.identifier)) {
+        await Notifications.cancelScheduledNotificationAsync(item.identifier);
+      }
     }
+
+    const fired = await readOverdueFired();
+    let count = 0;
+    const now = Date.now();
+
+    for (const item of open) {
+      const due = new Date(item.dueAt).getTime();
+      const overdue = due <= now;
+      const key = await overdueKey(item.id);
+      if (overdue && fired.has(key)) continue;
+
+      const when = overdue ? new Date(now + 20_000) : new Date(due);
+      const title = overdue ? `Overdue: ${item.name}` : `Follow-up: ${item.name}`;
+      const body = [item.type, item.notes].filter(Boolean).join(" · ") || "Open SalesTrack to call or visit.";
+
+      await Notifications.scheduleNotificationAsync({
+        identifier: identifierFor(item.id),
+        content: {
+          title,
+          body,
+          data: { leadId: item.leadId, followUpId: item.id },
+          sound: "default",
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: when,
+          channelId: "follow-ups",
+        },
+      });
+      if (overdue) fired.add(key);
+      count += 1;
+    }
+
+    await writeOverdueFired(fired);
+    return count;
+  } catch {
+    return 0;
   }
+}
 
-  const fired = await readOverdueFired();
-  let count = 0;
-  const now = Date.now();
-
-  for (const item of open) {
-    const due = new Date(item.dueAt).getTime();
-    const overdue = due <= now;
-    const key = await overdueKey(item.id);
-    if (overdue && fired.has(key)) continue;
-
-    const when = overdue ? new Date(now + 20_000) : new Date(due);
-    const title = overdue ? `Overdue: ${item.name}` : `Follow-up: ${item.name}`;
-    const body = [item.type, item.notes].filter(Boolean).join(" · ") || "Open SalesTrack to call or visit.";
-
+export async function presentLeadAssigned(leadId: number, name: string) {
+  const Notifications = loadNotifications();
+  if (!Notifications) return;
+  try {
+    await Notifications.setNotificationChannelAsync("leads", {
+      name: "New leads",
+      importance: Notifications.AndroidImportance.HIGH,
+    });
     await Notifications.scheduleNotificationAsync({
-      identifier: identifierFor(item.id),
+      identifier: `lead-${leadId}`,
       content: {
-        title,
-        body,
-        data: { leadId: item.leadId, followUpId: item.id },
+        title: "New lead assigned",
+        body: name,
+        data: { leadId },
         sound: "default",
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: when,
-        channelId: "follow-ups",
+        date: new Date(Date.now() + 1000),
+        channelId: "leads",
       },
     });
-    if (overdue) fired.add(key);
-    count += 1;
+  } catch {
+    // The lead is still in the list if the phone cannot show a banner.
   }
-
-  await writeOverdueFired(fired);
-  return count;
 }
 
 export function listenReminderTaps(onOpen: (leadId: number | null) => void) {
-  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-    const leadId = Number(response.notification.request.content.data?.leadId);
-    onOpen(Number.isFinite(leadId) && leadId > 0 ? leadId : null);
-  });
-  return () => sub.remove();
+  const Notifications = loadNotifications();
+  if (!Notifications) return () => undefined;
+  try {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const leadId = Number(response.notification.request.content.data?.leadId);
+      onOpen(Number.isFinite(leadId) && leadId > 0 ? leadId : null);
+    });
+    return () => sub.remove();
+  } catch {
+    return () => undefined;
+  }
 }

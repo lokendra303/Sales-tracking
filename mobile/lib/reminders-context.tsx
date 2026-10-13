@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AppState } from "react-native";
 import { router } from "expo-router";
 import { api, type FollowUp } from "./api";
 import { useAuth } from "./auth";
 import { persistGet, persistSet } from "./persist";
+import { registerPushToken, watchAssignedLeads } from "./lead-alerts";
 import { cancelAllReminders, listenReminderTaps, syncReminders } from "./reminders";
-import { isAdmin } from "./roles";
+import { isAdmin, isSales } from "./roles";
 
 type ReminderState = {
   enabled: boolean;
@@ -55,6 +57,25 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!accessToken || !user || !isSales(user.roles)) return;
+    let stop = false;
+    const tick = () => {
+      if (!stop) watchAssignedLeads(accessToken, user.name).catch(() => undefined);
+    };
+    tick();
+    void registerPushToken(accessToken);
+    const timer = setInterval(tick, 45000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") tick();
+    });
+    return () => {
+      stop = true;
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [accessToken, user]);
 
   const value = useMemo<ReminderState>(
     () => ({

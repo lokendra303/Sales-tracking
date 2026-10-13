@@ -38,21 +38,29 @@ export function waLink(phone: string) {
   return `https://wa.me/${withCountry}`;
 }
 
+async function openUrl(url: string) {
+  try {
+    await Linking.openURL(url);
+  } catch {
+    // A missing phone, WhatsApp, or map app must not close SalesTrack.
+  }
+}
+
 export async function openCall(phone: string) {
-  await Linking.openURL(`tel:${digits(phone)}`);
+  await openUrl(`tel:${digits(phone)}`);
 }
 
 export async function openWhatsApp(phone: string) {
-  await Linking.openURL(waLink(phone));
+  await openUrl(waLink(phone));
 }
 
 export async function openNavigate(lat?: number | null, lng?: number | null, address?: string | null) {
   if (lat != null && lng != null) {
-    await Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+    await openUrl(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
     return;
   }
   if (address) {
-    await Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`);
+    await openUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`);
   }
 }
 

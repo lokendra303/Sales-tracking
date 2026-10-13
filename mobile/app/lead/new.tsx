@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { router } from "expo-router";
 import { Alert, StyleSheet, Text, View } from "react-native";
-import * as Location from "expo-location";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
+import { loadLocation } from "@/lib/device-location";
 import { Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { ApiError, api, isOfflineError } from "@/lib/api";
@@ -29,6 +29,11 @@ export default function NewLeadScreen() {
   async function pinShop() {
     setPinning(true);
     try {
+      const Location = await loadLocation();
+      if (!Location) {
+        Alert.alert("Location needed", "Allow location so the executive can follow the map to this shop.");
+        return;
+      }
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
         Alert.alert("Location needed", "Allow location so the executive can follow the map to this shop.");

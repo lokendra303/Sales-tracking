@@ -68,6 +68,7 @@ export function RegistrationsPage() {
       <p className="muted">Managers register themselves. Approve first, then set Active or Inactive. Inactive companies cannot log in.</p>
       {error ? <p className="error">{error}</p> : null}
 
+      <div className="table-scroll">
       <table className="table">
         <thead>
           <tr>
@@ -118,6 +119,7 @@ export function RegistrationsPage() {
           ))}
         </tbody>
       </table>
+      </div>
       {!rows.length ? <p className="muted">No company requests yet.</p> : null}
     </div>
   );

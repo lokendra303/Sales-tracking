@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
   target: { fontSize: 22, fontWeight: "800", color: colors.text },
   barBg: { height: 8, backgroundColor: "#E5E7EB", borderRadius: 8, overflow: "hidden" },
   barFill: { height: 8, backgroundColor: colors.green },
-  stats: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  stats: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 8 },
   follow: { paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   link: { color: colors.blue, fontWeight: "800", fontSize: 13 },
   offline: { backgroundColor: colors.amberSoft, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: "#F59E0B" },

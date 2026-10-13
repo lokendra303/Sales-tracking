@@ -2,6 +2,7 @@ import { FollowUpType, LeadStatus, Prisma, Temperature } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { geocodeAddress, parseCoord } from "../../lib/geocode.js";
+import { notifyLeadAssigned } from "../../lib/lead-push.js";
 import { parseMobile } from "../../lib/phone.js";
 import { customerScope, isAdmin, isManager, leadScope, publicLead } from "./crm.helpers.js";
 import type { RoleCode } from "@prisma/client";
@@ -221,6 +222,10 @@ export async function createLead(input: {
     include: leadInclude,
   });
 
+  if (assigneeId && assigneeId !== input.userId) {
+    notifyLeadAssigned(assigneeId, { id: lead.id, name: lead.name });
+  }
+
   return publicLead(lead);
 }
 
@@ -316,6 +321,9 @@ export async function importLeads(input: {
       include: leadInclude,
     });
     created.push(publicLead(lead));
+    if (assignee && assignee.id !== input.userId) {
+      notifyLeadAssigned(assignee.id, { id: lead.id, name: lead.name });
+    }
   }
 
   return { created: created.length, skipped: skipped.length, leads: created, errors: skipped };
@@ -406,6 +414,9 @@ export async function assignLead(
     data: { assigneeId, status: lead.status === "NEW" ? "ASSIGNED" : lead.status },
     include: leadInclude,
   });
+  if (lead.assigneeId !== assigneeId) {
+    notifyLeadAssigned(assigneeId, { id: updated.id, name: updated.name });
+  }
   return publicLead(updated);
 }
 

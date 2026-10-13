@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "@/lib/theme";
@@ -27,6 +27,8 @@ const icons: Record<string, [keyof typeof Ionicons.glyphMap, keyof typeof Ionico
 
 export function AppTabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const labelSize = width < 360 ? 10 : 11;
   const items = state.routes.filter((route) => {
     const options = descriptors[route.key].options;
     if (options.href === null || options.tabBarShowLabel === false) return false;
@@ -62,7 +64,7 @@ export function AppTabBar({ state, descriptors, navigation }: TabBarProps) {
             style={styles.item}
           >
             <Ionicons name={focused ? pair[1] : pair[0]} size={22} color={color} />
-            <Text style={[styles.label, { color }, focused && styles.labelOn]} numberOfLines={1}>
+            <Text style={[styles.label, { color, fontSize: labelSize }, focused && styles.labelOn]} numberOfLines={1}>
               {label}
             </Text>
           </Pressable>

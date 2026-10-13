@@ -106,7 +106,9 @@ export default function LeadDetailScreen() {
     <Screen header={<ScreenHeader title="Lead" back align="center" fallback="/leads" />}>
       <Card>
         <View style={styles.row}>
-          <Text style={styles.name}>{lead.name}</Text>
+          <Text style={styles.name} numberOfLines={2}>
+            {lead.name}
+          </Text>
           <Badge label={temp.label} tone={lead.temperature === "HOT" ? "red" : lead.temperature === "COLD" ? "blue" : "amber"} />
         </View>
         {lead.customerId ? <Badge label="Customer" tone="green" /> : null}
@@ -257,7 +259,7 @@ export default function LeadDetailScreen() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  name: { fontSize: 22, fontWeight: "800", color: colors.text, flex: 1 },
+  name: { fontSize: 22, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
   section: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 8 },
   followTitle: { fontWeight: "800", color: colors.text },
   link: { color: colors.blue, fontWeight: "800" },

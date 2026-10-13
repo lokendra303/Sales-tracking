@@ -187,6 +187,24 @@ export async function me(userId: number) {
   return publicUser(user);
 }
 
+export async function savePushToken(userId: number, token: string, deviceUid = "salestrack-dev") {
+  await prisma.device.upsert({
+    where: { userId_deviceUid: { userId, deviceUid } },
+    create: {
+      userId,
+      deviceUid,
+      platform: "android",
+      pushToken: token,
+      lastSeenAt: new Date(),
+    },
+    update: {
+      pushToken: token,
+      status: "ACTIVE",
+      lastSeenAt: new Date(),
+    },
+  });
+}
+
 export async function changeOwnPassword(input: {
   userId: number;
   roles: RoleCode[];

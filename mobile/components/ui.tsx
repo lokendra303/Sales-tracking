@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type ScrollViewProps,
   type TextInputProps,
@@ -261,6 +262,9 @@ type BtnProps = {
 };
 
 export function Button({ title, onPress, disabled, loading, tone = "blue", icon, flex }: BtnProps) {
+  const { width } = useWindowDimensions();
+  const stack = width < 360;
+  const columns = width >= 720 ? "23%" : "47%";
   const palette = {
     blue: { bg: colors.blue, fg: "#fff", border: colors.blue },
     green: { bg: colors.green, fg: "#fff", border: colors.green },
@@ -275,7 +279,7 @@ export function Button({ title, onPress, disabled, loading, tone = "blue", icon,
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.btn,
-        flex && styles.flex,
+        flex && (stack ? styles.btnStack : [styles.btnFlex, { flexBasis: columns }]),
         { backgroundColor: palette.bg, borderColor: palette.border, opacity: disabled ? 0.45 : pressed ? 0.88 : 1 },
       ]}
     >
@@ -284,7 +288,9 @@ export function Button({ title, onPress, disabled, loading, tone = "blue", icon,
       ) : (
         <View style={styles.btnInner}>
           {icon ? <Ionicons name={icon} size={18} color={palette.fg} /> : null}
-          <Text style={[styles.btnText, { color: palette.fg }]}>{title}</Text>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={[styles.btnText, { color: palette.fg }]}>
+            {title}
+          </Text>
         </View>
       )}
     </Pressable>
@@ -359,10 +365,12 @@ export function EmptyState({ icon, text }: { icon: keyof typeof Ionicons.glyphMa
 export function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statValue} numberOfLines={1}>
+      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {value}
       </Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -453,6 +461,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     gap: 10,
+    width: "100%",
+    maxWidth: "100%",
     ...shadow,
   },
   field: { gap: 8 },
@@ -482,13 +492,17 @@ const styles = StyleSheet.create({
   btn: {
     borderRadius: radius.pill,
     paddingVertical: 14,
+    paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
-    minHeight: 50,
+    minHeight: 48,
+    overflow: "hidden",
   },
-  btnInner: { flexDirection: "row", alignItems: "center", gap: 8 },
-  btnText: { fontWeight: "800", fontSize: 15 },
+  btnFlex: { flexGrow: 1, flexShrink: 1, flexBasis: "47%", maxWidth: "100%" },
+  btnStack: { width: "100%" },
+  btnInner: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, maxWidth: "100%" },
+  btnText: { fontWeight: "800", fontSize: 14, textAlign: "center", flexShrink: 1 },
   chip: {
     alignSelf: "flex-start",
     paddingHorizontal: 14,
@@ -512,10 +526,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  stat: { flex: 1, alignItems: "center", gap: 4, minWidth: 72 },
-  statValue: { fontSize: 20, fontWeight: "800", color: colors.text },
+  stat: { flexGrow: 1, flexBasis: "22%", minWidth: 64, maxWidth: "100%", alignItems: "center", gap: 4 },
+  statValue: { fontSize: 20, fontWeight: "800", color: colors.text, width: "100%", textAlign: "center" },
   statLabel: { color: colors.muted, fontSize: 12, fontWeight: "600" },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  actions: { flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", gap: 8, width: "100%" },
   iconRound: {
     width: 40,
     height: 40,

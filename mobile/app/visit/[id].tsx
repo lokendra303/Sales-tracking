@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ActivityIndicator, Alert, Image, Platform, StyleSheet, Text } from "react-native";
-import * as Location from "expo-location";
 import { LiveCamera } from "@/components/live-camera";
+import { loadLocation } from "@/lib/device-location";
 import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { api, apiUpload, fetchVisitPhoto, isOfflineError, visitPhotoUri, type Visit } from "@/lib/api";
+import { api, apiUpload, fetchVisitPhoto, isOfflineError, serverReachable, visitPhotoUri, type Visit } from "@/lib/api";
 import { useOffline } from "@/lib/offline";
 import { keepPhoto } from "@/lib/photos";
 import { openCall, openNavigate, openWhatsApp, when } from "@/lib/format";
@@ -60,8 +60,9 @@ export default function VisitScreen() {
   async function saveLivePhoto(fileUri: string) {
     if (!accessToken || !visit) return;
     setBusy(true);
-    const permission = await Location.requestForegroundPermissionsAsync();
-    const position = permission.granted
+    const Location = await loadLocation();
+    const permission = Location ? await Location.requestForegroundPermissionsAsync() : { granted: false };
+    const position = permission.granted && Location
       ? await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
       : null;
     const kept = await keepPhoto(fileUri, `visit-${visit.id}-${Date.now()}`);
@@ -80,7 +81,7 @@ export default function VisitScreen() {
       setCapturing(false);
       await load();
     } catch (err) {
-      if (isOfflineError(err)) {
+      if (isOfflineError(err) && !(await serverReachable())) {
         await offline.enqueue({
           kind: "visit-photo",
           label: `Place photo · ${visit.name}`,
@@ -92,7 +93,14 @@ export default function VisitScreen() {
         Alert.alert("Saved on this phone", "The place photo will upload when you are back on Wi-Fi.");
         return;
       }
-      Alert.alert("Could not save photo", err instanceof Error ? err.message : "Try again.");
+      Alert.alert(
+        "Could not save photo",
+        isOfflineError(err)
+          ? "The phone is online, but the photo did not upload. Try again."
+          : err instanceof Error
+            ? err.message
+            : "Try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -159,6 +167,15 @@ export default function VisitScreen() {
 
   const open = visit.status === "IN_PROGRESS";
 
+  if (capturing && sales) {
+    return (
+      <Screen scroll={false} header={<ScreenHeader title="Shop photo" back align="center" fallback="/visits" />}>
+        {busy ? <ActivityIndicator color={colors.blue} /> : null}
+        <LiveCamera onCapture={saveLivePhoto} onCancel={() => setCapturing(false)} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen keyboard={open} header={<ScreenHeader title={open ? "Visit" : "Visit proof"} back align="center" fallback="/visits" />}>
       <Card>
@@ -192,14 +209,7 @@ export default function VisitScreen() {
 
       <Card>
         <Text style={styles.cardTitle}>Place photo</Text>
-        {capturing && sales ? (
-          <>
-            {busy ? <ActivityIndicator color={colors.blue} /> : null}
-            <LiveCamera onCapture={saveLivePhoto} onCancel={() => setCapturing(false)} />
-          </>
-        ) : (
-          <>
-            {visit.hasPhoto && accessToken ? (
+        {visit.hasPhoto && accessToken ? (
               <Image
                 source={
                   Platform.OS === "web"
@@ -231,9 +241,7 @@ export default function VisitScreen() {
                 disabled={busy}
               />
             ) : null}
-          </>
-        )}
-      </Card>
+        </Card>
 
       {open && sales ? (
         <>

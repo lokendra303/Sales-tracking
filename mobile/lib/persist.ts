@@ -1,17 +1,27 @@
-import { File, Directory, Paths } from "expo-file-system";
+type FileSystem = typeof import("expo-file-system");
 
-function root() {
-  return new Directory(Paths.document, "salestrack-offline");
+function root(fs: FileSystem) {
+  return new fs.Directory(fs.Paths.document, "salestrack-offline");
 }
 
-function fileFor(key: string) {
+function fileFor(fs: FileSystem, key: string) {
   const safe = key.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return new File(root(), `${safe}.json`);
+  return new fs.File(root(fs), `${safe}.json`);
+}
+
+async function loadFs() {
+  try {
+    return await import("expo-file-system");
+  } catch {
+    return null;
+  }
 }
 
 export async function persistGet(key: string) {
   try {
-    const file = fileFor(key);
+    const fs = await loadFs();
+    if (!fs) return null;
+    const file = fileFor(fs, key);
     if (!file.exists) return null;
     return await file.text();
   } catch {
@@ -20,16 +30,24 @@ export async function persistGet(key: string) {
 }
 
 export async function persistSet(key: string, value: string) {
-  const dir = root();
-  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
-  const file = fileFor(key);
-  if (!file.exists) file.create();
-  file.write(value);
+  try {
+    const fs = await loadFs();
+    if (!fs) return;
+    const dir = root(fs);
+    if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+    const file = fileFor(fs, key);
+    if (!file.exists) file.create();
+    file.write(value);
+  } catch {
+    // Keep the screen open if this phone cannot store the file.
+  }
 }
 
 export async function persistRemove(key: string) {
   try {
-    const file = fileFor(key);
+    const fs = await loadFs();
+    if (!fs) return;
+    const file = fileFor(fs, key);
     if (file.exists) file.delete();
   } catch {
     // ignore

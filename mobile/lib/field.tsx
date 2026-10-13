@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Alert, AppState, Platform } from "react-native";
 import { router } from "expo-router";
-import * as Location from "expo-location";
 import { api, ApiError, isOfflineError, type DaySummary, type FieldSession } from "./api";
+import { loadLocation } from "./device-location";
 import { persistGet, persistSet } from "./persist";
 import { appendGpsPoints, clearGpsQueue, readGpsQueue, trimGpsQueue, type GpsPoint } from "./gps-queue";
 import { useAuth } from "./auth";
@@ -46,7 +46,8 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState("");
   const [weakGps, setWeakGps] = useState(false);
   const [queuedPoints, setQueuedPoints] = useState(0);
-  const watchRef = useRef<Location.LocationSubscription | null>(null);
+  const watchRef = useRef<{ remove: () => void } | null>(null);
+  const watchingRef = useRef(false);
   const sessionRef = useRef<FieldSession | null>(null);
   const holdRef = useRef(0);
   const flushing = useRef(false);
@@ -142,14 +143,17 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   }, [accessToken, apply, refreshUser, rememberCount]);
 
   const stopWatch = useCallback(async () => {
+    watchingRef.current = false;
     watchRef.current?.remove();
     watchRef.current = null;
     if (Platform.OS !== "web") {
       try {
+        const Location = await loadLocation();
+        if (!Location) return;
         const started = await Location.hasStartedLocationUpdatesAsync(FIELD_LOCATION_TASK);
         if (started) await Location.stopLocationUpdatesAsync(FIELD_LOCATION_TASK);
       } catch {
-        // web or Expo Go
+        // An old location task must not close the app.
       }
     }
   }, []);
@@ -159,46 +163,51 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       await stopWatch();
       return;
     }
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (!permission.granted) {
+    if (watchingRef.current) return;
+    watchingRef.current = true;
+    const Location = await loadLocation();
+    if (!Location) {
+      watchingRef.current = false;
       setNotice("Location is off. Field work is running as a clock only.");
       return;
     }
-    await stopWatch();
-    const interval = Math.max(15, current.intervalSeconds) * 1000;
-    watchRef.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.Balanced, timeInterval: interval, distanceInterval: 40 },
-      async (position) => {
-        const point: GpsPoint = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy ?? undefined,
-          speed: position.coords.speed ?? undefined,
-          heading: position.coords.heading ?? undefined,
-          mocked: "mocked" in position.coords ? Boolean((position.coords as { mocked?: boolean }).mocked) : undefined,
-          capturedAt: new Date().toISOString(),
-        };
-        setWeakGps((position.coords.accuracy ?? 0) > 80);
-        await appendGpsPoints([point]);
-        const queued = await readGpsQueue();
-        setQueuedPoints(queued.length);
-        flush();
-      },
-    );
-    if (Platform.OS === "android") {
-      try {
-        await Location.startLocationUpdatesAsync(FIELD_LOCATION_TASK, {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: interval,
-          distanceInterval: 40,
-          foregroundService: {
-            notificationTitle: "Live location is on",
-            notificationBody: "SalesTrack is sharing GPS during field work.",
-          },
-        });
-      } catch {
-        // Expo web / missing background permission
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        watchingRef.current = false;
+        setNotice("Location is off. Field work is running as a clock only.");
+        return;
       }
+      const interval = Math.max(15, current.intervalSeconds) * 1000;
+      watchRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: interval, distanceInterval: 40 },
+        (position) => {
+          void (async () => {
+            try {
+              const point: GpsPoint = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+                accuracy: position.coords.accuracy ?? undefined,
+                speed: position.coords.speed ?? undefined,
+                heading: position.coords.heading ?? undefined,
+                mocked: "mocked" in position.coords ? Boolean((position.coords as { mocked?: boolean }).mocked) : undefined,
+                capturedAt: new Date().toISOString(),
+              };
+              setWeakGps((position.coords.accuracy ?? 0) > 80);
+              await appendGpsPoints([point]);
+              const queued = await readGpsQueue();
+              setQueuedPoints(queued.length);
+              flush();
+            } catch {
+              // One bad GPS reading must not close the app.
+            }
+          })();
+        },
+      );
+      watchingRef.current = true;
+    } catch {
+      watchingRef.current = false;
+      setNotice("Location is off. Field work is running as a clock only.");
     }
   }, [flush, stopWatch]);
 

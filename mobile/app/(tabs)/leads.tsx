@@ -16,6 +16,7 @@ import {
   SearchBox,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { useLayout } from "@/lib/layout";
 import { api, type Customer, type Lead } from "@/lib/api";
 import { leadIsOpen, leadStateLabel, money, openCall, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
 import { isSales } from "@/lib/roles";
@@ -41,6 +42,7 @@ export default function LeadsScreen() {
   const params = useLocalSearchParams<{ assigneeId?: string; filter?: string }>();
   const { manager: office, people } = useExecutives();
   const sales = isSales(user?.roles);
+  const { pagePad } = useLayout();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState(params.filter === "pending" ? "pending" : "all");
   const [exec, setExec] = useState<ExecValue>(execFromParam(params.assigneeId));
@@ -101,7 +103,7 @@ export default function LeadsScreen() {
         />
       }
     >
-      <View style={styles.head}>
+      <View style={[styles.head, { paddingHorizontal: pagePad }]}>
         <SearchBox placeholder="Search name or phone" value={q} onChangeText={setQ} onSubmit={load} />
         <View style={styles.filters}>
           {filters.map((item) => (
@@ -125,7 +127,9 @@ export default function LeadsScreen() {
               <Card key={`lead-${lead.id}`}>
                 <Pressable onPress={() => router.push(`/lead/${lead.id}`)}>
                   <View style={styles.row}>
-                    <Text style={styles.name}>{lead.name}</Text>
+                    <Text style={styles.name} numberOfLines={2}>
+                      {lead.name}
+                    </Text>
                     <Badge label={temp.label} tone={lead.temperature === "HOT" ? "red" : lead.temperature === "COLD" ? "blue" : "amber"} />
                   </View>
                   <Text style={styles.meta}>
@@ -213,7 +217,9 @@ export default function LeadsScreen() {
           {customers.map((customer) => (
             <Card key={`cust-${customer.id}`}>
               <View style={styles.row}>
-                <Text style={styles.name}>{customer.name}</Text>
+                <Text style={styles.name} numberOfLines={2}>
+                  {customer.name}
+                </Text>
                 <Badge label="Customer" tone="green" />
               </View>
               <Text style={styles.meta}>{customer.phone}</Text>
@@ -244,11 +250,11 @@ export default function LeadsScreen() {
 }
 
 const styles = StyleSheet.create({
-  head: { paddingHorizontal: 20, paddingTop: 8, gap: 12 },
+  head: { paddingTop: 8, gap: 12 },
   add: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" },
   filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  name: { fontSize: 17, fontWeight: "800", color: colors.text, flex: 1 },
-  meta: { color: colors.muted, marginTop: 4 },
+  name: { fontSize: 17, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
+  meta: { color: colors.muted, marginTop: 4, flexShrink: 1 },
   follow: { color: colors.text, fontWeight: "700", marginTop: 4 },
 });

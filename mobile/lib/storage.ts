@@ -1,25 +1,46 @@
 import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
+
+async function secureStore() {
+  try {
+    return await import("expo-secure-store");
+  } catch {
+    return null;
+  }
+}
 
 export async function setItem(key: string, value: string) {
-  if (Platform.OS === "web") {
-    localStorage.setItem(key, value);
-    return;
+  try {
+    if (Platform.OS === "web") {
+      localStorage.setItem(key, value);
+      return;
+    }
+    const store = await secureStore();
+    await store?.setItemAsync(key, value);
+  } catch {
+    // Keep the screen open if this phone cannot store the value.
   }
-  await SecureStore.setItemAsync(key, value);
 }
 
 export async function getItem(key: string) {
-  if (Platform.OS === "web") {
-    return localStorage.getItem(key);
+  try {
+    if (Platform.OS === "web") return localStorage.getItem(key);
+    const store = await secureStore();
+    if (!store) return null;
+    return await store.getItemAsync(key);
+  } catch {
+    return null;
   }
-  return SecureStore.getItemAsync(key);
 }
 
 export async function removeItem(key: string) {
-  if (Platform.OS === "web") {
-    localStorage.removeItem(key);
-    return;
+  try {
+    if (Platform.OS === "web") {
+      localStorage.removeItem(key);
+      return;
+    }
+    const store = await secureStore();
+    await store?.deleteItemAsync(key);
+  } catch {
+    // Already gone.
   }
-  await SecureStore.deleteItemAsync(key);
 }

@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { Alert, StyleSheet, Text } from "react-native";
-import * as Location from "expo-location";
 import { Button, Card, Screen, ScreenHeader } from "@/components/ui";
+import { loadLocation } from "@/lib/device-location";
 import { useAuth } from "@/lib/auth";
 import { api, isOfflineError, type BeatToday, type CheckPreview, type Visit } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
@@ -32,6 +32,11 @@ export default function CheckInScreen() {
     setLoading(true);
     setError("");
     try {
+      const Location = await loadLocation();
+      if (!Location) {
+        setError("Turn on location so we can check you are at the shop.");
+        return;
+      }
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
         setError("Turn on location so we can check you are at the shop.");

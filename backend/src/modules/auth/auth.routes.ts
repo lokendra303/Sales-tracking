@@ -2,7 +2,7 @@ import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
-import { changePasswordSchema, loginSchema, refreshSchema, registerOtpSchema, registerSchema, setPasswordSchema } from "./auth.schema.js";
+import { changePasswordSchema, loginSchema, pushTokenSchema, refreshSchema, registerOtpSchema, registerSchema, setPasswordSchema } from "./auth.schema.js";
 import * as authService from "./auth.service.js";
 
 export const authRouter = Router();
@@ -77,6 +77,16 @@ authRouter.get(
   asyncHandler(async (req, res) => {
     const user = await authService.me(req.auth!.userId);
     res.json({ success: true, data: user });
+  }),
+);
+
+authRouter.post(
+  "/push-token",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = pushTokenSchema.parse(req.body);
+    await authService.savePushToken(req.auth!.userId, body.token, body.deviceUid);
+    res.json({ success: true, data: { ok: true } });
   }),
 );
 

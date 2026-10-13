@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Alert, StyleSheet, Text } from "react-native";
-import * as ImagePicker from "expo-image-picker";
 import { Button, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, apiUpload, isOfflineError, type Sale } from "@/lib/api";
@@ -102,8 +101,9 @@ export default function RecordSaleScreen() {
         }
       }
 
-      const camera = await ImagePicker.requestCameraPermissionsAsync();
-      if (camera.granted) {
+      const ImagePicker = await import("expo-image-picker").catch(() => null);
+      const camera = ImagePicker ? await ImagePicker.requestCameraPermissionsAsync() : { granted: false };
+      if (ImagePicker && camera.granted) {
         const shot = await ImagePicker.launchCameraAsync({ quality: 0.55, allowsEditing: false });
         if (!shot.canceled && shot.assets[0] && (serverSaleId || saleJobId)) {
           await saveBill(shot.assets[0].uri, serverSaleId, saleJobId);

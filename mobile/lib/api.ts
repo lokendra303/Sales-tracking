@@ -1,5 +1,6 @@
 import { persistGet, persistSet } from "./persist";
 import { getItem, removeItem, setItem } from "./storage";
+import { Platform } from "react-native";
 
 function defaultBase() {
   return process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/$/, "") || "";
@@ -269,13 +270,27 @@ export function isOfflineError(err: unknown) {
   return /network|failed to fetch|timeout|aborted|network request failed|offline/i.test(message);
 }
 
-async function fetchJson(path: string, init: RequestInit) {
+async function fetchJson(path: string, init: RequestInit, timeoutMs = 20000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
-  } catch (err) {
+  } catch {
     throw new OfflineError("No internet. Work stays on this phone until Wi-Fi is back.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function serverReachable() {
+  if (!API_BASE) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
   } finally {
     clearTimeout(timer);
   }
@@ -404,30 +419,54 @@ export async function apiUpload<T>(
   path: string,
   options: { token?: string | null; fileUri: string; fields?: Record<string, string | number | undefined> },
 ): Promise<T> {
-  const form = new FormData();
+  const parameters: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.fields ?? {})) {
-    if (value != null) form.append(key, String(value));
+    if (value != null) parameters[key] = String(value);
   }
-  const part = await photoPart(options.fileUri);
-  if (part instanceof Blob) {
-    form.append("photo", part, "place.jpg");
-  } else {
-    form.append("photo", part);
-  }
-
   const headers: Record<string, string> = {};
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
 
-  const response = await fetchJson(path, {
-    method: "POST",
-    headers,
-    body: form,
-  });
-  const json = (await response.json()) as ApiResponse<T>;
-  if (!json.success) {
-    throw new ApiError(json.error.code, json.error.message, json.error.extra);
+  const nativeFile = Platform.OS !== "web" && !options.fileUri.startsWith("blob:") && !options.fileUri.startsWith("data:");
+  if (nativeFile) {
+    let result;
+    try {
+      const fs = await import("expo-file-system");
+      result = await new fs.File(options.fileUri).upload(`${API_BASE}${path}`, {
+        httpMethod: "POST",
+        uploadType: fs.UploadType.MULTIPART,
+        fieldName: "photo",
+        mimeType: "image/jpeg",
+        headers,
+        parameters,
+      });
+    } catch {
+      throw new OfflineError("No internet. Work stays on this phone until Wi-Fi is back.");
+    }
+    return readUpload<T>(result.status, result.body);
   }
+
+  const form = new FormData();
+  for (const [key, value] of Object.entries(parameters)) form.append(key, value);
+  const part = await photoPart(options.fileUri);
+  if (part instanceof Blob) form.append("photo", part, "place.jpg");
+  else form.append("photo", part);
+
+  const response = await fetchJson(path, { method: "POST", headers, body: form }, 90000);
+  const json = (await response.json()) as ApiResponse<T>;
+  if (!json.success) throw new ApiError(json.error.code, json.error.message, json.error.extra);
   return json.data;
+}
+
+function readUpload<T>(status: number, body: string): T {
+  try {
+    const json = JSON.parse(body) as ApiResponse<T>;
+    if (!json.success) throw new ApiError(json.error.code, json.error.message, json.error.extra);
+    return json.data;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    if (status === 413) throw new ApiError("TOO_LARGE", "The photo is too large. Take it again.");
+    throw new ApiError("SERVER_ERROR", "The server did not accept the photo. Try again.");
+  }
 }
 
 export function visitPhotoUri(visitId: number, token: string) {

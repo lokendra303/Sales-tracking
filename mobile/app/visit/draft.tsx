@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { Alert, Image, StyleSheet, Text } from "react-native";
-import * as Location from "expo-location";
+import { ActivityIndicator, Alert, Image, StyleSheet, Text } from "react-native";
 import { LiveCamera } from "@/components/live-camera";
+import { loadLocation } from "@/lib/device-location";
 import { Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { getLocalVisit, saveLocalVisit, type LocalVisit } from "@/lib/local-visits";
 import { useOffline } from "@/lib/offline";
@@ -39,8 +39,9 @@ export default function DraftVisitScreen() {
     setBusy(true);
     try {
       const kept = await keepPhoto(fileUri, `${visit.localId}-${Date.now()}`);
-      const permission = await Location.requestForegroundPermissionsAsync();
-      const position = permission.granted
+      const Location = await loadLocation();
+      const permission = Location ? await Location.requestForegroundPermissionsAsync() : { granted: false };
+      const position = permission.granted && Location
         ? await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
         : null;
       const capturedAt = new Date().toISOString();
@@ -128,6 +129,15 @@ export default function DraftVisitScreen() {
     );
   }
 
+  if (capturing) {
+    return (
+      <Screen scroll={false} header={<ScreenHeader title="Shop photo" back align="center" fallback="/visits" />}>
+        {busy ? <ActivityIndicator color={colors.blue} /> : null}
+        <LiveCamera onCapture={saveLivePhoto} onCancel={() => setCapturing(false)} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen keyboard header={<ScreenHeader title="Visit" back align="center" fallback="/visits" />}>
       <Card>
@@ -150,11 +160,7 @@ export default function DraftVisitScreen() {
 
       <Card>
         <Text style={styles.cardTitle}>Place photo</Text>
-        {capturing ? (
-          <LiveCamera onCapture={saveLivePhoto} onCancel={() => setCapturing(false)} />
-        ) : (
-          <>
-            {visit.photoUri ? (
+        {visit.photoUri ? (
               <Image source={{ uri: visit.photoUri }} style={styles.photo} />
             ) : (
               <Text style={typo.muted}>Open the live camera at the shop. The picture stays on this phone until it uploads.</Text>
@@ -168,9 +174,7 @@ export default function DraftVisitScreen() {
                 disabled={busy}
               />
             ) : null}
-          </>
-        )}
-      </Card>
+        </Card>
 
       {!visit.outcome ? (
         <>

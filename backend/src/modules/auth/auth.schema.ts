@@ -28,6 +28,11 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(10),
 });
 
+export const pushTokenSchema = z.object({
+  token: z.string().trim().min(20).max(191),
+  deviceUid: z.string().trim().min(3).max(191).optional(),
+});
+
 export const setPasswordSchema = z.object({
   userId: z.number().int().positive(),
   password: z.string().min(6, "Password must be at least 6 characters."),

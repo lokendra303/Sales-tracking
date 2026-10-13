@@ -160,6 +160,7 @@ model Device {
   platform    String       @default("android")
   appVersion  String?
   status      DeviceStatus @default(ACTIVE)
+  pushToken   String?      @db.VarChar(191)
   lastSeenAt  DateTime     @default(now())
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
