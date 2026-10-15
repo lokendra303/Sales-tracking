@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Platform, StyleSheet, Text, View } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
 import { Avatar, Button, Card, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { askBackgroundPermission, backgroundAllowed } from "@/lib/background-permission";
@@ -49,6 +49,12 @@ export default function MoreScreen() {
       </Card>
       <Card>
         <Row label="Access" value={accessLabel(roles)} />
+        {user?.employeeId ? <Row label="Employee ID" value={user.employeeId} /> : null}
+        {user?.designation ? <Row label="Designation" value={user.designation} /> : null}
+        {user?.email ? <Row label="Email" value={user.email} /> : null}
+        {user?.city ? <Row label="City" value={user.city} /> : null}
+        {user?.address ? <Row label="Address" value={user.address} /> : null}
+        {user?.joiningDate ? <Row label="Joined" value={when(user.joiningDate)} /> : null}
         {office ? (
           <>
             <Row label="Web portal" value="Yes — desk work" />
@@ -82,6 +88,7 @@ export default function MoreScreen() {
           </>
         ) : null}
       </Card>
+      {office ? <Button title="Edit profile" tone="outline" onPress={() => router.push("/profile/edit" as Href)} /> : null}
       {!isAdmin(roles) ? <Button title="Open reminders" onPress={() => router.push("/notifications")} /> : null}
       {background === false ? <Button title="Allow running in background" onPress={allowBackground} /> : null}
       {offline.pending || !offline.online ? (

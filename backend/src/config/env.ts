@@ -25,6 +25,7 @@ export const env = {
   adminName: process.env.ADMIN_NAME?.trim() ?? "",
   adminPhone: (process.env.ADMIN_PHONE ?? "").replace(/\D/g, ""),
   adminPassword: process.env.ADMIN_PASSWORD ?? "",
+  adminEmail: (process.env.ADMIN_EMAIL ?? "").trim().toLowerCase(),
   smtp: {
     host: required("SMTP_HOST"),
     port: Number(required("SMTP_PORT")),

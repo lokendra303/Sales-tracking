@@ -12,7 +12,7 @@ const titles: Record<string, string> = {
   "/map": "Live map",
   "/reports": "Reports",
   "/settings": "Company",
-  "/registrations": "Managers",
+  "/registrations": "Managers & companies",
   "/profile": "Account",
 };
 

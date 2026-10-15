@@ -2,7 +2,18 @@ import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
-import { changePasswordSchema, loginSchema, pushTokenSchema, refreshSchema, registerOtpSchema, registerSchema, setPasswordSchema } from "./auth.schema.js";
+import {
+  changePasswordSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  pushTokenSchema,
+  refreshSchema,
+  registerOtpSchema,
+  registerSchema,
+  resetPasswordSchema,
+  setPasswordSchema,
+  updateProfileSchema,
+} from "./auth.schema.js";
 import * as authService from "./auth.service.js";
 
 export const authRouter = Router();
@@ -54,6 +65,30 @@ authRouter.post(
 );
 
 authRouter.post(
+  "/forgot-password",
+  otpLimiter,
+  asyncHandler(async (req, res) => {
+    const body = forgotPasswordSchema.parse(req.body);
+    const data = await authService.sendForgotPasswordOtp(body.phone);
+    res.json({ success: true, data });
+  }),
+);
+
+authRouter.post(
+  "/forgot-password/reset",
+  loginLimiter,
+  asyncHandler(async (req, res) => {
+    const body = resetPasswordSchema.parse(req.body);
+    const data = await authService.resetPasswordWithOtp({
+      phone: body.phone,
+      otp: body.otp,
+      newPassword: body.newPassword,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+authRouter.post(
   "/refresh",
   asyncHandler(async (req, res) => {
     const body = refreshSchema.parse(req.body);
@@ -76,6 +111,17 @@ authRouter.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const user = await authService.me(req.auth!.userId);
+    res.json({ success: true, data: user });
+  }),
+);
+
+authRouter.patch(
+  "/me",
+  requireAuth,
+  requireRole("ADMIN", "MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = updateProfileSchema.parse(req.body);
+    const user = await authService.updateOwnProfile(req.auth!.userId, req.auth!.roles, body);
     res.json({ success: true, data: user });
   }),
 );

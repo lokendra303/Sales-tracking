@@ -8,7 +8,9 @@ export function LoginPage({ blocked = false }: { blocked?: boolean }) {
   const { login, logout, user } = useAuth();
   const navigate = useNavigate();
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [adminMode, setAdminMode] = useState(false);
   const [error, setError] = useState(blocked ? "Sales executives use the SalesTrack mobile app." : "");
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +19,7 @@ export function LoginPage({ blocked = false }: { blocked?: boolean }) {
     setError("");
     setLoading(true);
     try {
-      await login(phone.trim(), password);
+      await login(phone.trim(), password, adminMode ? email.trim() : undefined);
       navigate("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not log in.");
@@ -61,6 +63,24 @@ export function LoginPage({ blocked = false }: { blocked?: boolean }) {
             <>
               <p className="kicker">Sign in</p>
               <h2>Open the desk</h2>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={adminMode}
+                  onChange={(e) => setAdminMode(e.target.checked)}
+                />
+                <span>System admin (email + mobile + password)</span>
+              </label>
+              {adminMode ? (
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Admin email"
+                  autoComplete="email"
+                  required
+                />
+              ) : null}
               <input
                 value={phone}
                 onChange={(e) => setPhone(mobileDigits(e.target.value))}
@@ -69,10 +89,16 @@ export function LoginPage({ blocked = false }: { blocked?: boolean }) {
                 autoComplete="tel"
               />
               <PasswordField value={password} onChange={setPassword} />
+              {adminMode ? (
+                <p className="muted small">Admin sign-in needs all three. Managers use mobile + password only.</p>
+              ) : null}
               {error ? <p className="error">{error}</p> : null}
               <button className="btn blue" disabled={loading}>
                 {loading ? "Signing in…" : "Enter desk"}
               </button>
+              <p className="muted small">
+                <Link to="/forgot-password">Forgot password?</Link>
+              </p>
               <p className="muted small">
                 New company? <Link to="/register">Register as manager</Link>
               </p>

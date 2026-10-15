@@ -4,6 +4,7 @@ import { isAdmin, isManager, isPlatformAdmin, isSales } from "./lib/roles";
 import { AppLayout } from "./layout/AppLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { HomePage } from "./pages/HomePage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { TeamPage } from "./pages/TeamPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { LeadsPage } from "./pages/LeadsPage";
@@ -27,6 +28,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );

@@ -15,6 +15,8 @@ export const mobileSchema = z.string().trim().transform((value, ctx) => {
 export const loginSchema = z.object({
   phone: mobileSchema,
   password: z.string().min(1, "Enter your password."),
+  /** Required for system admin (email + mobile + password). Ignored for managers/sales. */
+  email: z.string().trim().email("Enter a valid email address.").optional(),
   device: z
     .object({
       deviceUid: z.string().min(3),
@@ -64,4 +66,29 @@ export const registerSchema = z.object({
   email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(6, "Password must be at least 6 characters."),
   otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit code from your email."),
+});
+
+export const forgotPasswordSchema = z.object({
+  phone: mobileSchema,
+});
+
+export const resetPasswordSchema = z
+  .object({
+    phone: mobileSchema,
+    otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit code from your email."),
+    newPassword: z.string().min(6, "Password must be at least 6 characters."),
+    confirmPassword: z.string().min(1, "Confirm the new password."),
+  })
+  .refine((value) => value.newPassword === value.confirmPassword, {
+    message: "New password and confirm password do not match.",
+    path: ["confirmPassword"],
+  });
+
+export const updateProfileSchema = z.object({
+  name: z.string().trim().min(2).optional(),
+  phone: mobileSchema.optional(),
+  email: z.string().trim().email().optional(),
+  designation: z.string().trim().min(2).max(80).optional(),
+  city: z.string().trim().min(2).max(80).optional(),
+  address: z.string().trim().max(500).nullable().optional(),
 });

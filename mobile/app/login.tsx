@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Redirect, router } from "expo-router";
+import { Redirect, router, type Href } from "expo-router";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Field, PasswordField, Screen } from "@/components/ui";
@@ -10,7 +10,9 @@ import { colors, typo } from "@/lib/theme";
 export default function LoginScreen() {
   const { user, login } = useAuth();
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [adminMode, setAdminMode] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,7 +25,7 @@ export default function LoginScreen() {
     setError("");
     setLoading(true);
     try {
-      await login(phone.trim(), password, remember);
+      await login(phone.trim(), password, remember, adminMode ? email.trim() : undefined);
       router.replace("/(tabs)");
     } catch (err) {
       setError(
@@ -48,6 +50,29 @@ export default function LoginScreen() {
       </View>
 
       <View style={styles.card}>
+        <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: adminMode }}
+          onPress={() => setAdminMode((value) => !value)}
+          style={styles.remember}
+        >
+          <Ionicons name={adminMode ? "checkbox" : "square-outline"} size={22} color={colors.blue} />
+          <View style={styles.rememberCopy}>
+            <Text style={styles.rememberTitle}>System admin</Text>
+            <Text style={styles.rememberHint}>Needs email + mobile + password</Text>
+          </View>
+        </Pressable>
+        {adminMode ? (
+          <Field
+            label="Admin email"
+            placeholder="you@company.com"
+            keyboardType="email-address"
+            value={email}
+            onChangeText={setEmail}
+            autoComplete="email"
+            autoCapitalize="none"
+          />
+        ) : null}
         <Field
           label="Mobile number"
           placeholder="10-digit mobile"
@@ -72,7 +97,9 @@ export default function LoginScreen() {
         </Pressable>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Button title="Log in" onPress={onSubmit} loading={loading} />
-        <Text style={styles.help}>Forgot password? Contact admin.</Text>
+        <Pressable onPress={() => router.push("/forgot-password" as Href)}>
+          <Text style={styles.help}>Forgot password? Managers and admins can reset by email OTP.</Text>
+        </Pressable>
       </View>
     </Screen>
   );

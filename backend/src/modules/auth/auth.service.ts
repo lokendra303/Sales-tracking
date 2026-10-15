@@ -26,6 +26,11 @@ function publicUser(user: {
   name: string;
   phone: string;
   email: string | null;
+  employeeId?: string | null;
+  designation?: string | null;
+  city?: string | null;
+  address?: string | null;
+  joiningDate?: Date | null;
   status: string;
   platformAdmin?: boolean;
   roles: { role: { code: RoleCode; name: string } }[];
@@ -37,6 +42,11 @@ function publicUser(user: {
     name: user.name,
     phone: user.phone,
     email: user.email,
+    employeeId: user.employeeId ?? null,
+    designation: user.designation ?? null,
+    city: user.city ?? null,
+    address: user.address ?? null,
+    joiningDate: user.joiningDate ?? null,
     status: user.status,
     roles,
     tenant: {
@@ -73,6 +83,7 @@ async function issueTokens(userId: number, tenantId: number, roles: RoleCode[], 
 export async function login(input: {
   phone: string;
   password: string;
+  email?: string;
   device?: { deviceUid: string; platform: string; appVersion?: string };
 }) {
   const phone = parseMobile(input.phone);
@@ -86,20 +97,32 @@ export async function login(input: {
   if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
     throw unauthorized("Wrong mobile number or password.");
   }
+
+  const roles = user.roles.map((item) => item.role.code);
+  const isSystemAdmin = Boolean(user.platformAdmin) || roles.includes("ADMIN");
+  if (isSystemAdmin) {
+    const givenEmail = input.email ? normalizeEmail(input.email) : "";
+    const storedEmail = user.email ? normalizeEmail(user.email) : "";
+    if (!givenEmail) {
+      throw unauthorized("Admin login requires email, mobile number, and password.");
+    }
+    if (!storedEmail || givenEmail !== storedEmail) {
+      throw unauthorized("Wrong email, mobile number, or password.");
+    }
+  }
+
   if (user.tenant.status === "pending") {
     throw forbidden("Admin has not approved this company yet. Try again after approval.");
   }
   if (user.tenant.status === "rejected") {
     throw forbidden("This registration was declined. Contact the system admin.");
   }
-  if (user.tenant.status === "inactive") {
-    throw forbidden("This company is inactive. Contact the system admin.");
+  if (user.tenant.status === "inactive" || user.tenant.status === "suspended") {
+    throw forbidden("This company is suspended. Contact the system admin.");
   }
   if (user.status !== "ACTIVE" || user.tenant.status !== "active") {
     throw forbidden("This account is not active.");
   }
-
-  const roles = user.roles.map((item) => item.role.code);
   let deviceId: number | undefined;
 
   if (input.device) {
@@ -389,4 +412,156 @@ export async function register(input: {
     companyName: tenant.name,
     phone,
   };
+}
+
+const RESET_PURPOSE = "reset_password";
+
+/** Managers and admins only. OTP goes to the email already saved on the account. */
+export async function sendForgotPasswordOtp(phoneRaw: string) {
+  const phone = parseMobile(phoneRaw);
+  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
+
+  const user = await prisma.user.findFirst({
+    where: {
+      phone,
+      status: "ACTIVE",
+      roles: { some: { role: { code: { in: ["ADMIN", "MANAGER"] } } } },
+    },
+    include: { roles: { include: { role: true } } },
+  });
+
+  // Same reply either way so phone numbers cannot be probed.
+  const ok = { sent: true, message: "If this account has a registered email, a code was sent. It expires in 10 minutes." };
+  if (!user?.email) return ok;
+
+  const email = normalizeEmail(user.email);
+  const latest = await prisma.emailOtp.findFirst({
+    where: { email, purpose: RESET_PURPOSE },
+    orderBy: { createdAt: "desc" },
+  });
+  if (latest && Date.now() - latest.createdAt.getTime() < OTP_RESEND_MS) {
+    throw badRequest("Wait a minute before requesting another code.");
+  }
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const sent = await prisma.emailOtp.count({
+    where: { email, purpose: RESET_PURPOSE, createdAt: { gte: hourAgo } },
+  });
+  if (sent >= 5) throw badRequest("Too many codes sent. Try again later.");
+
+  const code = String(randomInt(100000, 1000000));
+  await prisma.emailOtp.create({
+    data: {
+      email,
+      purpose: RESET_PURPOSE,
+      codeHash: hashToken(code),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+    },
+  });
+
+  try {
+    await sendMail(
+      email,
+      "Your SalesTrack password reset code",
+      `Your SalesTrack password reset code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`,
+    );
+  } catch (error) {
+    await prisma.emailOtp.deleteMany({
+      where: { email, purpose: RESET_PURPOSE, consumedAt: null, codeHash: hashToken(code) },
+    });
+    console.error(error);
+    throw badRequest("Could not send the code. Check that SMTP is configured and try again.");
+  }
+
+  return ok;
+}
+
+export async function resetPasswordWithOtp(input: { phone: string; otp: string; newPassword: string }) {
+  const phone = parseMobile(input.phone);
+  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
+  if (input.newPassword.length < 6) throw badRequest("Password must be at least 6 characters.");
+
+  const user = await prisma.user.findFirst({
+    where: {
+      phone,
+      status: "ACTIVE",
+      roles: { some: { role: { code: { in: ["ADMIN", "MANAGER"] } } } },
+    },
+  });
+  if (!user?.email) throw badRequest("No reset is available for this mobile number.");
+
+  const email = normalizeEmail(user.email);
+  const row = await prisma.emailOtp.findFirst({
+    where: { email, purpose: RESET_PURPOSE, consumedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!row) throw badRequest("Request a new code. This one is missing or expired.");
+  if (row.attempts >= 5) throw badRequest("Too many wrong codes. Request a new one.");
+  if (!codesMatch(row.codeHash, input.otp.trim())) {
+    await prisma.emailOtp.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } });
+    throw badRequest("That code is wrong.");
+  }
+  const used = await prisma.emailOtp.updateMany({
+    where: { id: row.id, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+  if (used.count !== 1) throw badRequest("Request a new code.");
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash: await hashPassword(input.newPassword) },
+  });
+  await prisma.refreshToken.updateMany({
+    where: { userId: user.id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+
+  return { ok: true, message: "Password updated. Log in with your new password." };
+}
+
+/** Admin or manager can update their own mobile / email / profile details. */
+export async function updateOwnProfile(
+  userId: number,
+  roles: RoleCode[],
+  input: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    designation?: string;
+    city?: string;
+    address?: string | null;
+  },
+) {
+  if (!roles.includes("ADMIN") && !roles.includes("MANAGER")) {
+    throw forbidden("Ask your manager to update your profile.");
+  }
+  const current = await prisma.user.findUnique({ where: { id: userId }, include: userInclude });
+  if (!current) throw unauthorized();
+
+  if (input.phone && input.phone !== current.phone) {
+    const taken = await prisma.user.findFirst({
+      where: { tenantId: current.tenantId, phone: input.phone, id: { not: current.id } },
+    });
+    if (taken) throw badRequest("Another account already uses this mobile number.");
+  }
+  if (input.email) {
+    const email = normalizeEmail(input.email);
+    if (email !== (current.email ?? "").toLowerCase()) {
+      const taken = await prisma.user.findFirst({ where: { email, id: { not: current.id } } });
+      if (taken) throw badRequest("This email is already registered.");
+    }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: current.id },
+    data: {
+      name: input.name?.trim(),
+      phone: input.phone,
+      email: input.email ? normalizeEmail(input.email) : undefined,
+      designation: input.designation?.trim(),
+      city: input.city?.trim(),
+      address: input.address === undefined ? undefined : input.address?.trim() || null,
+    },
+    include: userInclude,
+  });
+  return publicUser(updated);
 }

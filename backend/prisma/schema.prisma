@@ -91,6 +91,11 @@ model User {
   name         String
   phone        String
   email        String?
+  employeeId   String?    @db.VarChar(40)
+  designation  String?    @db.VarChar(80)
+  city         String?    @db.VarChar(80)
+  address      String?    @db.Text
+  joiningDate  DateTime?
   passwordHash String
   status        UserStatus @default(ACTIVE)
   platformAdmin Boolean    @default(false)
@@ -115,6 +120,7 @@ model User {
   monthlyTargets    MonthlyTarget[]
 
   @@unique([tenantId, phone])
+  @@unique([tenantId, employeeId])
   @@map("user")
 }
 

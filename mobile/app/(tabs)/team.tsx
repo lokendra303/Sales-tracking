@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar, Badge, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
@@ -13,6 +13,9 @@ type TeamUser = {
   id: number;
   name: string;
   phone: string;
+  employeeId?: string | null;
+  designation?: string | null;
+  city?: string | null;
   status: string;
   roles: string[];
 };
@@ -138,7 +141,9 @@ export default function TeamScreen() {
                     {item.name}
                   </Text>
                   <Text style={typo.muted} numberOfLines={1}>
-                    {manager ? item.phone : `${roleLabel(item.roles)} · ${item.phone}`}
+                    {manager
+                      ? [item.employeeId, item.designation, item.phone].filter(Boolean).join(" · ")
+                      : `${roleLabel(item.roles)} · ${item.phone}`}
                   </Text>
                   {inField ? (
                     <Text style={styles.fieldLine} numberOfLines={1}>
@@ -154,6 +159,11 @@ export default function TeamScreen() {
               </View>
               {manager ? (
                 <View style={styles.actions}>
+                  <MiniAction
+                    icon="create-outline"
+                    label="Edit"
+                    onPress={() => router.push(`/user/${item.id}` as Href)}
+                  />
                   <MiniAction
                     icon="briefcase-outline"
                     label="Leads"

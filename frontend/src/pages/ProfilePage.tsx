@@ -1,19 +1,62 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { PasswordField } from "../components/PasswordField";
-import { api } from "../lib/api";
+import { api, type ApiUser } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { accessLabel, isAdmin, isManager, roleLabel } from "../lib/roles";
+import { mobileDigits } from "../lib/phone";
+import { accessLabel, isAdmin, roleLabel } from "../lib/roles";
 
 export function ProfilePage() {
-  const { user, accessToken } = useAuth();
+  const { user, accessToken, refreshUser } = useAuth();
   const admin = isAdmin(user?.roles);
-  const manager = isManager(user?.roles);
+  const [name, setName] = useState(user?.name ?? "");
+  const [phone, setPhone] = useState(user?.phone ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [designation, setDesignation] = useState(user?.designation ?? "");
+  const [city, setCity] = useState(user?.city ?? "");
+  const [address, setAddress] = useState(user?.address ?? "");
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setName(user?.name ?? "");
+    setPhone(user?.phone ?? "");
+    setEmail(user?.email ?? "");
+    setDesignation(user?.designation ?? "");
+    setCity(user?.city ?? "");
+    setAddress(user?.address ?? "");
+  }, [user]);
+
+  async function onSaveProfile(event: FormEvent) {
+    event.preventDefault();
+    if (!accessToken) return;
+    setError("");
+    setNotice("");
+    setSaving(true);
+    try {
+      await api<ApiUser>("/auth/me", {
+        method: "PATCH",
+        token: accessToken,
+        body: JSON.stringify({
+          name,
+          phone,
+          email: email || undefined,
+          designation: designation || undefined,
+          city: city || undefined,
+          address: address || null,
+        }),
+      });
+      await refreshUser();
+      setNotice("Profile saved. The next login uses this mobile number from the database — not the .env seed values.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update profile.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function onChangePassword(event: FormEvent) {
     event.preventDefault();
@@ -34,7 +77,7 @@ export function ProfilePage() {
       setOldPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setNotice("Password updated.");
+      setNotice("Password updated in the database. Use it on the next login.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change password.");
     } finally {
@@ -45,7 +88,11 @@ export function ProfilePage() {
   return (
     <div className="page">
       <h1>Profile</h1>
-      <p className="muted">Same login on the web portal and the mobile app.</p>
+      <p className="muted">
+        First-time seed from backend .env: <code>ADMIN_PHONE</code>, <code>ADMIN_PASSWORD</code>, and{" "}
+        <code>ADMIN_EMAIL</code>. Admin login needs email + mobile + password (more secure than managers). After the
+        first seed, change them here anytime. Forgot password sends an OTP to the email on this profile.
+      </p>
 
       <article className="card person">
         <div className="brand">
@@ -57,51 +104,57 @@ export function ProfilePage() {
         </div>
       </article>
 
-      <article className="card">
-        <h2>Account</h2>
-        <p>Phone: {user?.phone}</p>
-        <p>Company: {user?.tenant.name}</p>
-        <p>Role: {roleLabel(user?.roles)}</p>
-        <p>
+      <form className="card form" onSubmit={onSaveProfile}>
+        <h2>Account details</h2>
+        <div className="grid-2">
+          <label>
+            Full name
+            <input value={name} onChange={(e) => setName(e.target.value)} required />
+          </label>
+          <label>
+            Mobile (login)
+            <input value={phone} onChange={(e) => setPhone(mobileDigits(e.target.value))} inputMode="numeric" required />
+          </label>
+          <label>
+            Email (password reset OTP)
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          <label>
+            Designation
+            <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
+          </label>
+          <label>
+            City
+            <input value={city} onChange={(e) => setCity(e.target.value)} />
+          </label>
+        </div>
+        <label>
+          Address
+          <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} />
+        </label>
+        <p className="muted">Company: {user?.tenant.name}</p>
+        <p className="muted">
           {admin
             ? "System admin. Managers register themselves. You approve the company, not the sales team."
             : "You manage sales executives. Field visits stay on their phones."}
         </p>
-      </article>
+        <p className="muted">Access: {accessLabel(user?.roles)}</p>
+        <button className="btn green" disabled={saving}>
+          Save profile
+        </button>
+      </form>
 
-      <article className="card">
-        <h2>Access</h2>
-        <p className="on">{accessLabel(user?.roles)}</p>
-        <ul className="access">
-          <li>
-            <strong>Web portal</strong>
-            <span>Desk work — {admin ? "managers and company settings" : "team, leads, follow-ups"}</span>
-          </li>
-          <li>
-            <strong>Mobile app</strong>
-            <span>Same account on the phone — {admin ? "settings and managers" : "team and leads on the go"}</span>
-          </li>
-        </ul>
-        {manager ? <p className="muted">Sales executives have mobile only. They cannot open this portal.</p> : null}
-      </article>
-
-      {admin || manager ? (
-        <article className="card">
-          <p className="kicker">Security</p>
-          <h2>Change password</h2>
-          <p className="muted">Enter your current password, then the new one twice. Salespeople cannot change theirs — you give them a login.</p>
-          <form className="form" onSubmit={onChangePassword} style={{ width: "100%", marginTop: 12 }}>
-            <PasswordField value={oldPassword} onChange={setOldPassword} placeholder="Current password" required autoComplete="current-password" />
-            <PasswordField value={newPassword} onChange={setNewPassword} placeholder="New password" required autoComplete="new-password" />
-            <PasswordField value={confirmPassword} onChange={setConfirmPassword} placeholder="Confirm new password" required autoComplete="new-password" />
-            {error ? <p className="error">{error}</p> : null}
-            {notice ? <p className="on">{notice}</p> : null}
-            <button className="btn blue" disabled={saving}>
-              {saving ? "Saving…" : "Update password"}
-            </button>
-          </form>
-        </article>
-      ) : null}
+      <form className="card form" onSubmit={onChangePassword}>
+        <h2>Change password</h2>
+        <PasswordField value={oldPassword} onChange={setOldPassword} placeholder="Current password" required />
+        <PasswordField value={newPassword} onChange={setNewPassword} placeholder="New password" required autoComplete="new-password" />
+        <PasswordField value={confirmPassword} onChange={setConfirmPassword} placeholder="Confirm new password" required autoComplete="new-password" />
+        <button className="btn blue" disabled={saving}>
+          Update password
+        </button>
+      </form>
+      {error ? <p className="error">{error}</p> : null}
+      {notice ? <p className="on">{notice}</p> : null}
     </div>
   );
 }

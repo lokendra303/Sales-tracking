@@ -33,7 +33,7 @@ export function HomePage() {
       <h1>{user?.name.split(" ")[0]}</h1>
       <p className="muted">
         {admin
-          ? "System admin desk — managers register themselves. You only approve the company."
+          ? "System admin desk — review manager details, approve companies, and suspend anytime."
           : "Desk for the sales team. Plan the beat and review proof here. Field work stays on the phone."}
       </p>
 
@@ -87,7 +87,7 @@ export function HomePage() {
             <p className="kicker">Approvals</p>
             <p className="stat">{pending}</p>
             <p className="muted">Companies waiting</p>
-            <Link to="/registrations">Approve managers</Link>
+            <Link to="/registrations">Managers & companies</Link>
           </article>
         ) : null}
         {admin ? (

@@ -7,7 +7,7 @@ type AuthState = {
   user: ApiUser | null;
   accessToken: string | null;
   ready: boolean;
-  login: (phone: string, password: string, remember: boolean) => Promise<void>;
+  login: (phone: string, password: string, remember: boolean, email?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
@@ -107,12 +107,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       accessToken,
       ready,
-      login: async (phone, password, remember) => {
+      login: async (phone, password, remember, email) => {
         const data = await api<{ user: ApiUser; accessToken: string; refreshToken: string }>("/auth/login", {
           method: "POST",
           body: JSON.stringify({
             phone,
             password,
+            ...(email?.trim() ? { email: email.trim() } : {}),
             device: { deviceUid: "salestrack-dev", platform: "android", appVersion: "0.1.0" },
           }),
         });

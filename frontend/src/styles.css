@@ -107,6 +107,16 @@ a:hover { color: var(--teal-2); }
 .form { display: grid; gap: 12px; width: min(420px, 92vw); }
 .form.wide { width: 100%; max-width: 760px; }
 .form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+.check-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.check-row input { width: auto; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .row-form { width: auto; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; }
 input, .search, select, textarea {

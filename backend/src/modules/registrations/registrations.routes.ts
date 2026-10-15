@@ -15,6 +15,14 @@ registrationsRouter.get(
   }),
 );
 
+registrationsRouter.get(
+  "/:tenantId",
+  asyncHandler(async (req, res) => {
+    const data = await registrations.getRegistration(Number(req.params.tenantId));
+    res.json({ success: true, data });
+  }),
+);
+
 registrationsRouter.post(
   "/:tenantId/decide",
   asyncHandler(async (req, res) => {
@@ -29,6 +37,15 @@ registrationsRouter.post(
   asyncHandler(async (req, res) => {
     const body = z.object({ active: z.boolean() }).parse(req.body);
     const data = await registrations.setCompanyActive(Number(req.params.tenantId), body.active);
+    res.json({ success: true, data });
+  }),
+);
+
+registrationsRouter.post(
+  "/:tenantId/suspend",
+  asyncHandler(async (req, res) => {
+    const body = z.object({ suspended: z.boolean() }).parse(req.body);
+    const data = await registrations.setCompanyActive(Number(req.params.tenantId), !body.suspended);
     res.json({ success: true, data });
   }),
 );

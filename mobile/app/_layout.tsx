@@ -50,11 +50,14 @@ export default function RootLayout() {
       <FieldProvider>
         <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }}>
         <Stack.Screen name="login" />
+        <Stack.Screen name="forgot-password" />
+        <Stack.Screen name="profile/edit" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="lead/new" />
         <Stack.Screen name="lead/[id]" />
         <Stack.Screen name="follow-up/new" />
         <Stack.Screen name="user/new" />
+        <Stack.Screen name="user/[id]" />
         <Stack.Screen name="visit/check-in" />
         <Stack.Screen name="visit/[id]" />
         <Stack.Screen name="sale/new" />

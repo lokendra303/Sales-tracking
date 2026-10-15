@@ -12,11 +12,31 @@ export type ApiUser = {
   id: number;
   name: string;
   phone: string;
+  email?: string | null;
+  employeeId?: string | null;
+  designation?: string | null;
+  city?: string | null;
+  address?: string | null;
+  joiningDate?: string | null;
   roles: string[];
   tenant: { id: number; name: string; slug: string };
   liveLocationEnabled: boolean;
   currency: string;
   timezone: string;
+};
+
+export type TeamPerson = {
+  id: number;
+  name: string;
+  phone: string;
+  email: string | null;
+  employeeId: string | null;
+  designation: string | null;
+  city: string | null;
+  address: string | null;
+  joiningDate: string | null;
+  status: string;
+  roles: string[];
 };
 
 export type Lead = {
