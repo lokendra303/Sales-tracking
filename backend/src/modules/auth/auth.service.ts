@@ -1,4 +1,5 @@
 import { timingSafeEqual, randomInt } from "node:crypto";
+import { env } from "../../config/env.js";
 import { prisma } from "../../lib/prisma.js";
 import { createRefreshTokenValue, hashPassword, hashToken, verifyPassword } from "../../lib/hash.js";
 import { sendMail } from "../../lib/mail.js";
@@ -9,6 +10,8 @@ import type { RoleCode } from "@prisma/client";
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_RESEND_MS = 60 * 1000;
+/** Forgot-password resend cooldown (registration keeps the longer window). */
+const RESET_RESEND_MS = 15 * 1000;
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -416,37 +419,71 @@ export async function register(input: {
 
 const RESET_PURPOSE = "reset_password";
 
-/** Managers and admins only. OTP goes to the email already saved on the account. */
-export async function sendForgotPasswordOtp(phoneRaw: string) {
-  const phone = parseMobile(phoneRaw);
-  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
+function maskEmail(email: string) {
+  const [local, domain] = email.split("@");
+  if (!domain || !local) return "your registered email";
+  const tip = local.length <= 2 ? `${local[0] ?? "*"}*` : `${local.slice(0, 2)}***`;
+  return `${tip}@${domain}`;
+}
 
-  const user = await prisma.user.findFirst({
+/** Prefer system admin when the same mobile exists on more than one desk account. */
+async function findDeskUserByPhone(phone: string) {
+  const users = await prisma.user.findMany({
     where: {
       phone,
       status: "ACTIVE",
       roles: { some: { role: { code: { in: ["ADMIN", "MANAGER"] } } } },
     },
     include: { roles: { include: { role: true } } },
+    orderBy: [{ platformAdmin: "desc" }, { id: "asc" }],
   });
+  return users[0] ?? null;
+}
 
-  // Same reply either way so phone numbers cannot be probed.
-  const ok = { sent: true, message: "If this account has a registered email, a code was sent. It expires in 10 minutes." };
-  if (!user?.email) return ok;
+/** Managers and admins only. OTP goes to the email already saved on the account. */
+export async function sendForgotPasswordOtp(phoneRaw: string) {
+  const phone = parseMobile(phoneRaw);
+  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
+
+  let user = await findDeskUserByPhone(phone);
+
+  // Same generic reply when the account is missing, so phone numbers cannot be probed.
+  const generic = {
+    sent: true,
+    message: "If this account has a registered email, a code was sent. It expires in 10 minutes.",
+  };
+  if (!user) return generic;
+
+  // First-time admin email from .env if the portal never saved one.
+  if (!user.email && user.platformAdmin && env.adminEmail) {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { email: env.adminEmail },
+      include: { roles: { include: { role: true } } },
+    });
+  }
+  if (!user.email) return generic;
 
   const email = normalizeEmail(user.email);
   const latest = await prisma.emailOtp.findFirst({
     where: { email, purpose: RESET_PURPOSE },
     orderBy: { createdAt: "desc" },
   });
-  if (latest && Date.now() - latest.createdAt.getTime() < OTP_RESEND_MS) {
-    throw badRequest("Wait a minute before requesting another code.");
+  if (latest && Date.now() - latest.createdAt.getTime() < RESET_RESEND_MS) {
+    const waitSec = Math.ceil((RESET_RESEND_MS - (Date.now() - latest.createdAt.getTime())) / 1000);
+    throw badRequest(`Wait ${waitSec}s before requesting another code.`);
   }
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
   const sent = await prisma.emailOtp.count({
     where: { email, purpose: RESET_PURPOSE, createdAt: { gte: hourAgo } },
   });
-  if (sent >= 5) throw badRequest("Too many codes sent. Try again later.");
+  if (sent >= 8) throw badRequest("Too many codes sent. Try again later.");
+
+  // Only one active code — older unused codes confused admin resets.
+  await prisma.emailOtp.updateMany({
+    where: { email, purpose: RESET_PURPOSE, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
 
   const code = String(randomInt(100000, 1000000));
   await prisma.emailOtp.create({
@@ -472,7 +509,10 @@ export async function sendForgotPasswordOtp(phoneRaw: string) {
     throw badRequest("Could not send the code. Check that SMTP is configured and try again.");
   }
 
-  return ok;
+  return {
+    sent: true,
+    message: `Code sent to ${maskEmail(email)}. Use the newest email only. It expires in 10 minutes.`,
+  };
 }
 
 export async function resetPasswordWithOtp(input: { phone: string; otp: string; newPassword: string }) {
@@ -480,31 +520,31 @@ export async function resetPasswordWithOtp(input: { phone: string; otp: string; 
   if (!phone) throw badRequest("Enter a 10-digit mobile number.");
   if (input.newPassword.length < 6) throw badRequest("Password must be at least 6 characters.");
 
-  const user = await prisma.user.findFirst({
-    where: {
-      phone,
-      status: "ACTIVE",
-      roles: { some: { role: { code: { in: ["ADMIN", "MANAGER"] } } } },
-    },
-  });
+  const user = await findDeskUserByPhone(phone);
   if (!user?.email) throw badRequest("No reset is available for this mobile number.");
 
   const email = normalizeEmail(user.email);
-  const row = await prisma.emailOtp.findFirst({
+  const given = input.otp.trim();
+  const candidates = await prisma.emailOtp.findMany({
     where: { email, purpose: RESET_PURPOSE, consumedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { createdAt: "desc" },
   });
-  if (!row) throw badRequest("Request a new code. This one is missing or expired.");
-  if (row.attempts >= 5) throw badRequest("Too many wrong codes. Request a new one.");
-  if (!codesMatch(row.codeHash, input.otp.trim())) {
-    await prisma.emailOtp.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } });
-    throw badRequest("That code is wrong.");
+  if (!candidates.length) throw badRequest("Request a new code. This one is missing or expired.");
+
+  const row = candidates.find((item) => item.attempts < 5 && codesMatch(item.codeHash, given));
+  if (!row) {
+    await prisma.emailOtp.update({
+      where: { id: candidates[0].id },
+      data: { attempts: { increment: 1 } },
+    });
+    if (candidates[0].attempts + 1 >= 5) throw badRequest("Too many wrong codes. Request a new one.");
+    throw badRequest("That code is wrong. Use the newest email code, or request a new one.");
   }
-  const used = await prisma.emailOtp.updateMany({
-    where: { id: row.id, consumedAt: null },
+
+  await prisma.emailOtp.updateMany({
+    where: { email, purpose: RESET_PURPOSE, consumedAt: null },
     data: { consumedAt: new Date() },
   });
-  if (used.count !== 1) throw badRequest("Request a new code.");
 
   await prisma.user.update({
     where: { id: user.id },
@@ -515,7 +555,14 @@ export async function resetPasswordWithOtp(input: { phone: string; otp: string; 
     data: { revokedAt: new Date() },
   });
 
-  return { ok: true, message: "Password updated. Log in with your new password." };
+  if (user.platformAdmin) {
+    return {
+      ok: true,
+      message:
+        "Password updated. On sign-in, tick System admin and use email + mobile + your new password.",
+    };
+  }
+  return { ok: true, message: "Password updated. Log in with your mobile and new password." };
 }
 
 /** Admin or manager can update their own mobile / email / profile details. */
