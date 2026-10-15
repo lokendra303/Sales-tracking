@@ -1,17 +1,18 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
+import { BarChart, MixBar, TargetHero, dayKey, lastNDays } from "@/components/progress-charts";
 import { Card, EmptyState, KpiTile, Screen, ScreenHeader, SectionTitle, TileGrid } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { api, type Funnel, type ReportSummary, type Sale } from "@/lib/api";
+import { api, type Funnel, type ReportSummary, type Sale, type Visit } from "@/lib/api";
 import { isSales } from "@/lib/roles";
-import { money, when } from "@/lib/format";
-import { colors, radius, shadow, typo } from "@/lib/theme";
+import { isoDay, money, when } from "@/lib/format";
+import { colors, typo } from "@/lib/theme";
 
 function FunnelBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
-  const width = max ? Math.max(4, Math.round((value / max) * 100)) : 4;
+  const width = max ? Math.max(6, Math.round((value / max) * 100)) : 6;
   return (
     <View style={styles.funnelRow}>
       <View style={styles.funnelHead}>
@@ -25,6 +26,12 @@ function FunnelBar({ label, value, max, color }: { label: string; value: number;
   );
 }
 
+function shiftDay(by: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + by);
+  return isoDay(d);
+}
+
 export default function ReportsScreen() {
   const { user, accessToken } = useAuth();
   const mine = isSales(user?.roles);
@@ -33,55 +40,81 @@ export default function ReportsScreen() {
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [funnel, setFunnel] = useState<Funnel | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [visits, setVisits] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
       if (!accessToken) return;
-      const qs = !mine && typeof exec === "number" ? `?userId=${exec}` : "";
-      const salesQs = !mine && typeof exec === "number" ? `&userId=${exec}` : "";
+      const who = !mine && typeof exec === "number" ? `userId=${exec}` : "";
+      const summaryQs = who ? `?${who}` : "";
+      const andWho = who ? `&${who}` : "";
       Promise.all([
-        api<ReportSummary>(`/reports/summary${qs}`, { token: accessToken }),
+        api<ReportSummary>(`/reports/summary${summaryQs}`, { token: accessToken }),
         api<Funnel>("/reports/funnel?days=30", { token: accessToken }),
-        api<Sale[]>(`/sales?days=30${salesQs}`, { token: accessToken }),
+        api<Sale[]>(`/sales?days=30${andWho}`, { token: accessToken }),
+        api<Visit[]>(`/visits?from=${shiftDay(-6)}&to=${isoDay()}${andWho}`, { token: accessToken }),
       ])
-        .then(([nextSummary, nextFunnel, nextSales]) => {
+        .then(([nextSummary, nextFunnel, nextSales, nextVisits]) => {
           setSummary(nextSummary);
           setFunnel(nextFunnel);
           setSales(nextSales);
+          setVisits(nextVisits);
         })
         .catch(() => undefined)
         .finally(() => setLoading(false));
     }, [accessToken, exec, mine]),
   );
 
+  const visitByDay = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const visit of visits) {
+      if (visit.status !== "COMPLETED") continue;
+      const key = dayKey(visit.checkedInAt);
+      map[key] = (map[key] ?? 0) + 1;
+    }
+    return map;
+  }, [visits]);
+
+  const salesCountByDay = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const sale of sales) {
+      const key = dayKey(sale.createdAt);
+      map[key] = (map[key] ?? 0) + 1;
+    }
+    return map;
+  }, [sales]);
+
+  const visitBars = lastNDays(7, visitByDay, colors.blue);
+  const saleBars = lastNDays(7, salesCountByDay, colors.green);
+
   return (
-    <Screen header={<ScreenHeader title={mine ? "My performance" : "Team performance"} subtitle={mine ? "Your visits, sales and follow-ups" : "All executives, or pick one"} />}>
+    <Screen header={<ScreenHeader title={mine ? "My performance" : "Team performance"} subtitle={mine ? "Progress graphs for visits and sales" : "All executives, or pick one"} />}>
       {manager ? <ExecFilter people={people} value={exec} onChange={setExec} /> : null}
       {loading || !summary ? (
         <ActivityIndicator color={colors.blue} />
       ) : (
         <>
-          <View style={styles.hero}>
-            <View style={styles.heroTop}>
-              <Text style={styles.heroLabel}>This month</Text>
-              {summary.monthTarget ? (
-                <View style={styles.heroPill}>
-                  <Text style={styles.heroPillText}>{summary.targetPercent}%</Text>
-                </View>
-              ) : null}
-            </View>
-            <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-              {money(summary.monthSalesAmount)}
-            </Text>
-            <Text style={styles.heroSub}>
-              {summary.monthTarget ? `of ${money(summary.monthTarget)} target` : "No target set"} · {summary.monthSalesCount} sale
-              {summary.monthSalesCount === 1 ? "" : "s"}
-            </Text>
-            <View style={styles.heroBar}>
-              <View style={[styles.heroFill, { width: `${Math.min(100, summary.targetPercent)}%` }]} />
-            </View>
-          </View>
+          <TargetHero
+            amountLabel={money(summary.monthSalesAmount)}
+            percent={summary.targetPercent}
+            sublabel={
+              summary.monthTarget
+                ? `of ${money(summary.monthTarget)} · ${summary.monthSalesCount} sale${summary.monthSalesCount === 1 ? "" : "s"}`
+                : `No target set · ${summary.monthSalesCount} sale${summary.monthSalesCount === 1 ? "" : "s"}`
+            }
+          />
+
+          <SectionTitle title="Today’s mix" />
+          <Card>
+            <MixBar
+              slices={[
+                { key: "ok", label: "Successful", value: summary.successVisits, color: colors.green },
+                { key: "miss", label: "Not there", value: summary.unavailableVisits, color: colors.amber },
+                { key: "overdue", label: "Overdue follow-ups", value: summary.overdueFollowUps, color: colors.red },
+              ]}
+            />
+          </Card>
 
           <SectionTitle title="Today" />
           <TileGrid>
@@ -124,13 +157,25 @@ export default function ReportsScreen() {
             </Card>
           ) : null}
 
+          <SectionTitle title="Visits · last 7 days" />
+          <Card>
+            <BarChart points={visitBars} emptyText="No completed visits in the last 7 days." />
+            <Text style={styles.chartHint}>Completed visits each day</Text>
+          </Card>
+
+          <SectionTitle title="Sales · last 7 days" />
+          <Card>
+            <BarChart points={saleBars} emptyText="No sales in the last 7 days." />
+            <Text style={styles.chartHint}>Number of sales each day</Text>
+          </Card>
+
           {funnel ? (
             <>
               <SectionTitle title={`Funnel · last ${funnel.days} days`} />
               <Card>
                 <FunnelBar label="Leads" value={funnel.leads} max={funnel.leads} color={colors.blue} />
-                <FunnelBar label="Visited" value={funnel.visited} max={funnel.leads} color={colors.amber} />
-                <FunnelBar label="Sold" value={funnel.sold} max={funnel.leads} color={colors.green} />
+                <FunnelBar label="Visited" value={funnel.visited} max={Math.max(funnel.leads, 1)} color={colors.amber} />
+                <FunnelBar label="Sold" value={funnel.sold} max={Math.max(funnel.leads, 1)} color={colors.green} />
                 <Text style={typo.muted}>
                   {funnel.leadToVisitPercent}% lead to visit · {funnel.visitToSalePercent}% visit to sale
                 </Text>
@@ -177,17 +222,9 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   saleRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
   saleIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: colors.greenSoft, alignItems: "center", justifyContent: "center" },
-  funnelRow: { gap: 6 },
+  funnelRow: { gap: 6, marginBottom: 10 },
   funnelHead: { flexDirection: "row", justifyContent: "space-between" },
   funnelLabel: { color: colors.text, fontWeight: "700", fontSize: 14 },
   funnelValue: { color: colors.text, fontWeight: "800", fontSize: 14 },
-  hero: { backgroundColor: colors.ink, borderRadius: radius.lg, padding: 20, gap: 6, ...shadow },
-  heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  heroLabel: { color: "#BFDBFE", fontWeight: "700", fontSize: 13, letterSpacing: 0.3 },
-  heroPill: { backgroundColor: "rgba(255,255,255,0.16)", borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
-  heroPillText: { color: "#fff", fontWeight: "800", fontSize: 12 },
-  heroValue: { color: "#fff", fontSize: 32, fontWeight: "800", letterSpacing: -0.5 },
-  heroSub: { color: "#BFDBFE", fontSize: 13, fontWeight: "600" },
-  heroBar: { height: 8, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.18)", overflow: "hidden", marginTop: 8 },
-  heroFill: { height: 8, borderRadius: 8, backgroundColor: "#4ADE80" },
+  chartHint: { ...typo.muted, marginTop: 8 },
 });

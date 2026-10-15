@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { ProgressRing } from "@/components/progress-charts";
 import { ActionTile, Avatar, Badge, Card, EmptyState, KpiTile, SectionTitle, TileGrid } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type FieldTeammate, type FollowUp } from "@/lib/api";
@@ -87,20 +88,26 @@ export function ManagerHome({
       ) : null}
 
       <View style={styles.hero}>
-        <View style={styles.heroTop}>
-          <Text style={styles.heroLabel}>Team sales · {monthName()}</Text>
-          {monthTarget ? (
-            <View style={styles.heroPill}>
-              <Text style={styles.heroPillText}>{targetPercent}%</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-          {money(monthSales)}
-        </Text>
-        <Text style={styles.heroSub}>{monthTarget ? `of ${money(monthTarget)} monthly target` : "No monthly target set yet"}</Text>
-        <View style={styles.heroBar}>
-          <View style={[styles.heroFill, { width: `${Math.min(100, targetPercent)}%` }]} />
+        <View style={styles.heroMain}>
+          <View style={{ flex: 1, gap: 4, minWidth: 0 }}>
+            <Text style={styles.heroLabel}>Team sales · {monthName()}</Text>
+            <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+              {money(monthSales)}
+            </Text>
+            <Text style={styles.heroSub}>
+              {monthTarget ? `of ${money(monthTarget)} monthly target` : "No monthly target set yet"}
+            </Text>
+          </View>
+          <ProgressRing
+            percent={targetPercent}
+            size={96}
+            thickness={9}
+            color="#4ADE80"
+            trackColor="rgba(255,255,255,0.18)"
+            label={`${Math.min(100, Math.round(targetPercent || 0))}%`}
+            sublabel="target"
+            lightLabel
+          />
         </View>
         <View style={styles.heroFoot}>
           <View style={styles.heroStat}>
@@ -240,6 +247,7 @@ const styles = StyleSheet.create({
     gap: 6,
     ...shadow,
   },
+  heroMain: { flexDirection: "row", alignItems: "center", gap: 12 },
   heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   heroLabel: { color: "#BFDBFE", fontWeight: "700", fontSize: 13, letterSpacing: 0.3 },
   heroPill: { backgroundColor: "rgba(255,255,255,0.16)", borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },

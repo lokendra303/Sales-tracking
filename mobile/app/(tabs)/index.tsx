@@ -3,12 +3,13 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { ManagerHome } from "@/components/manager-home";
+import { MixBar, ProgressRing } from "@/components/progress-charts";
 import { Avatar, Badge, Button, Card, EmptyState, Screen, ScreenHeader, Stat } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { useField } from "@/lib/field";
 import { useOffline } from "@/lib/offline";
 import { api, type BeatPlan, type BeatToday, type FollowUp } from "@/lib/api";
-import { ageLabel, tomorrowDay, when } from "@/lib/format";
+import { ageLabel, money, tomorrowDay, when } from "@/lib/format";
 import { isAdmin, isManager, isOffice, isSales, roleLabel } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
@@ -258,27 +259,47 @@ export default function HomeScreen() {
         </Card>
       ) : manager ? null : (
         <Card>
-          <Text style={styles.cardTitle}>{isSales(roles) ? "Today" : "Company today"}</Text>
+          <Text style={styles.cardTitle}>{isSales(roles) ? "Your progress" : "Company today"}</Text>
           {isSales(roles) ? (
-            <>
-              <Text style={styles.target}>
-                ₹{monthSales.toLocaleString("en-IN")} / ₹{monthTarget ? monthTarget.toLocaleString("en-IN") : "—"}
-              </Text>
-              <View style={styles.barBg}>
-                <View style={[styles.barFill, { width: `${Math.min(100, targetPercent)}%` }]} />
+            <View style={styles.progressBlock}>
+              <ProgressRing
+                percent={targetPercent}
+                size={96}
+                thickness={9}
+                color={colors.green}
+                trackColor={colors.line}
+                label={`${Math.min(100, Math.round(targetPercent || 0))}%`}
+                sublabel="target"
+              />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={styles.target}>{money(monthSales)}</Text>
+                <Text style={typo.muted}>
+                  {monthTarget ? `of ${money(monthTarget)} this month` : "Ask manager to set a monthly target"}
+                </Text>
+                <Text style={typo.muted}>{todaySales ? `Today ${money(todaySales)}` : "No sales yet today"}</Text>
+                <MixBar
+                  slices={[
+                    { key: "visits", label: "Visits", value: todayVisits, color: colors.blue },
+                    { key: "leads", label: "Leads", value: todayLeads, color: colors.amber },
+                    { key: "overdue", label: "Overdue", value: overdue, color: colors.red },
+                  ]}
+                />
               </View>
-              <Text style={typo.muted}>
-                {monthTarget ? `${targetPercent}% of monthly target` : "Ask your manager to set a monthly target"}
-                {todaySales ? ` · today ₹${todaySales.toLocaleString("en-IN")}` : ""}
-              </Text>
-            </>
+            </View>
+          ) : (
+            <View style={styles.stats}>
+              {isManager(roles) ? <Stat label="Team" value={String(teamCount)} /> : null}
+              <Stat label="Leads" value={String(todayLeads)} />
+              <Stat label="Overdue" value={String(overdue)} />
+            </View>
+          )}
+          {isSales(roles) ? (
+            <View style={styles.stats}>
+              <Stat label="Visits" value={String(todayVisits)} />
+              <Stat label="Leads" value={String(todayLeads)} />
+              <Stat label="Overdue" value={String(overdue)} />
+            </View>
           ) : null}
-          <View style={styles.stats}>
-            {isManager(roles) ? <Stat label="Team" value={String(teamCount)} /> : null}
-            <Stat label="Leads" value={String(todayLeads)} />
-            {isSales(roles) ? <Stat label="Visits" value={String(todayVisits)} /> : null}
-            <Stat label="Overdue" value={String(overdue)} />
-          </View>
         </Card>
       )}
 
@@ -313,6 +334,7 @@ const styles = StyleSheet.create({
   live: { color: colors.text, fontWeight: "700", fontSize: 15 },
   warn: { color: "#92400E", fontWeight: "700", lineHeight: 20 },
   target: { fontSize: 22, fontWeight: "800", color: colors.text },
+  progressBlock: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 12 },
   barBg: { height: 8, backgroundColor: "#E5E7EB", borderRadius: 8, overflow: "hidden" },
   barFill: { height: 8, backgroundColor: colors.green },
   stats: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 8 },

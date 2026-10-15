@@ -238,10 +238,13 @@ export async function listVisits(input: {
 }) {
   let start: Date;
   let end: Date;
+  const todayEnd = dayBounds().end;
   if (input.from) {
     start = parseDay(input.from).start;
     end = parseDay(input.to || input.from).end;
-    if (end < start) [start, end] = [parseDay(input.to).start, parseDay(input.from).end];
+    if (end < start) [start, end] = [parseDay(input.to || input.from).start, parseDay(input.from).end];
+    if (end > todayEnd) end = todayEnd;
+    if (start > end) start = dayBounds().start;
   } else {
     end = new Date();
     start = new Date();
