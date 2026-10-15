@@ -2,7 +2,7 @@ import { FollowUpType, LeadStatus, Prisma, Temperature } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { geocodeAddress, parseCoord } from "../../lib/geocode.js";
-import { notifyLeadAssigned, notifyLeadDecision, notifyLeadForApproval } from "../../lib/lead-push.js";
+import { notifyLeadAssigned, notifyLeadDecision } from "../../lib/lead-push.js";
 import { parseMobile } from "../../lib/phone.js";
 import { customerScope, isAdmin, isManager, leadScope, publicLead } from "./crm.helpers.js";
 import type { RoleCode } from "@prisma/client";
@@ -194,7 +194,7 @@ export async function createLead(input: {
   }
   const assigneeId = manager ? input.assigneeId ?? null : input.userId;
   const status: LeadStatus = assigneeId ? "ASSIGNED" : "NEW";
-  const approvalStatus = manager ? "APPROVED" : "PENDING";
+  const approvalStatus = "APPROVED";
   let latitude = parseCoord(input.latitude, -90, 90);
   let longitude = parseCoord(input.longitude, -180, 180);
   if ((latitude == null || longitude == null) && (input.address || input.city)) {
@@ -229,9 +229,6 @@ export async function createLead(input: {
 
   if (assigneeId && assigneeId !== input.userId) {
     notifyLeadAssigned(assigneeId, { id: lead.id, name: lead.name });
-  }
-  if (approvalStatus === "PENDING") {
-    notifyLeadForApproval(input.tenantId, { id: lead.id, name: lead.name }, lead.createdBy?.name ?? "a salesperson");
   }
 
   return publicLead(lead);

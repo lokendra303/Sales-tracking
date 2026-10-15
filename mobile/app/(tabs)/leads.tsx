@@ -42,7 +42,7 @@ const emptyText: Record<StageBucket, string> = {
   todo: "Nothing to do right now. Planned follow-ups are under Later.",
   later: "No follow-ups planned for later days.",
   done: "Nothing finished today yet. Shops you visit or sell to show here.",
-  waiting: "No leads are waiting for your manager.",
+  waiting: "No leads are waiting.",
 };
 
 function execFromParam(raw?: string): ExecValue {
@@ -356,7 +356,7 @@ export default function LeadsScreen() {
                     ? "No lead matches this search."
                     : leads.length
                       ? emptyText[tab]
-                      : "No leads assigned to you yet. A lead you add waits for your manager's approval."
+                      : "No leads assigned to you yet. Add a lead and it appears here right away."
                   : filter === "pending"
                     ? "No leads are waiting for approval."
                     : "No leads in this view. Assign a shop to an executive, or tap +."
