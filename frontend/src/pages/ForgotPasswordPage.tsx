@@ -72,11 +72,19 @@ export function ForgotPasswordPage() {
       <section className="login-panel">
         <form className="card form" onSubmit={step === "request" ? requestCode : resetPassword}>
           <p className="kicker">Forgot password</p>
-          <h2>{step === "request" ? "Send email code" : "Set a new password"}</h2>
+          <h2>{step === "request" ? "Find your account" : "Set a new password"}</h2>
+          {step === "request" ? (
+            <p className="muted small">
+              Enter the mobile number you use to sign in. We will email a 6-digit code to the address saved on that
+              account — not to this phone by SMS.
+            </p>
+          ) : (
+            <p className="muted small">Check your email inbox (and spam) for the 6-digit code.</p>
+          )}
           <input
             value={phone}
             onChange={(e) => setPhone(mobileDigits(e.target.value))}
-            placeholder="10-digit mobile number"
+            placeholder="Your login mobile number"
             inputMode="numeric"
             autoComplete="tel"
             required
@@ -87,7 +95,7 @@ export function ForgotPasswordPage() {
               <input
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="6-digit email code"
+                placeholder="6-digit code from email"
                 inputMode="numeric"
                 required
               />
@@ -98,7 +106,7 @@ export function ForgotPasswordPage() {
           {error ? <p className="error">{error}</p> : null}
           {notice ? <p className="on">{notice}</p> : null}
           <button className="btn blue" disabled={busy}>
-            {busy ? "Please wait…" : step === "request" ? "Send code" : "Save new password"}
+            {busy ? "Please wait…" : step === "request" ? "Email me a code" : "Save new password"}
           </button>
           {step === "reset" ? (
             <button type="button" className="link" onClick={() => setStep("request")}>

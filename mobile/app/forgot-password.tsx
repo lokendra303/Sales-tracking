@@ -64,12 +64,22 @@ export default function ForgotPasswordScreen() {
   return (
     <Screen keyboard header={<ScreenHeader title="Forgot password" back align="center" fallback="/login" />}>
       <Text style={typo.muted}>
-        For managers and admins only. We email a 6-digit code to the address already saved on your account.
+        Managers and admins only. Enter the mobile you use to sign in. The 6-digit code is emailed to the address
+        saved on that account — not sent by SMS.
       </Text>
-      <Field label="Mobile number" value={phone} onChangeText={setPhone} keyboardType="number-pad" digitsOnly editable={step === "request"} />
+      <Field
+        label="Login mobile number"
+        value={phone}
+        onChangeText={setPhone}
+        keyboardType="number-pad"
+        digitsOnly
+        editable={step === "request"}
+        placeholder="10-digit mobile"
+      />
       {step === "reset" ? (
         <>
-          <Field label="Email code" value={otp} onChangeText={setOtp} keyboardType="number-pad" digitsOnly placeholder="6 digits" />
+          <Text style={typo.muted}>Check your email inbox (and spam) for the code.</Text>
+          <Field label="Code from email" value={otp} onChangeText={setOtp} keyboardType="number-pad" digitsOnly placeholder="6 digits" />
           <PasswordField label="New password" value={newPassword} onChangeText={setNewPassword} />
           <PasswordField label="Confirm password" value={confirmPassword} onChangeText={setConfirmPassword} />
         </>
@@ -77,7 +87,7 @@ export default function ForgotPasswordScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {notice ? <Text style={styles.ok}>{notice}</Text> : null}
       <Button
-        title={step === "request" ? "Send code" : "Save new password"}
+        title={step === "request" ? "Email me a code" : "Save new password"}
         tone="green"
         onPress={step === "request" ? requestCode : resetPassword}
         loading={busy}
