@@ -2,7 +2,7 @@ import { timingSafeEqual, randomInt } from "node:crypto";
 import { env } from "../../config/env.js";
 import { prisma } from "../../lib/prisma.js";
 import { createRefreshTokenValue, hashPassword, hashToken, verifyPassword } from "../../lib/hash.js";
-import { sendMail } from "../../lib/mail.js";
+import { queueMail } from "../../lib/mail.js";
 import { refreshExpiry, signAccessToken } from "../../lib/tokens.js";
 import { badRequest, forbidden, unauthorized } from "../../lib/errors.js";
 import { parseMobile } from "../../lib/phone.js";
@@ -308,30 +308,29 @@ export async function sendRegisterOtp(emailRaw: string) {
   if (sent >= 5) throw badRequest("Too many codes sent. Try again later.");
 
   const code = String(randomInt(100000, 1000000));
+  const codeHash = hashToken(code);
   await prisma.emailOtp.create({
     data: {
       email,
       purpose: "register",
-      codeHash: hashToken(code),
+      codeHash,
       expiresAt: new Date(Date.now() + OTP_TTL_MS),
     },
   });
 
-  try {
-    await sendMail(
-      email,
-      "Your SalesTrack registration code",
-      `Your SalesTrack registration code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`,
-    );
-  } catch (error) {
-    await prisma.emailOtp.deleteMany({
-      where: { email, purpose: "register", consumedAt: null, codeHash: hashToken(code) },
-    });
-    console.error(error);
-    throw badRequest("Could not send the code. Check the email address and try again.");
-  }
+  // Do not block the HTTP response on Gmail SMTP (often several seconds).
+  queueMail(
+    email,
+    "Your SalesTrack registration code",
+    `Your SalesTrack registration code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`,
+    async () => {
+      await prisma.emailOtp.deleteMany({
+        where: { email, purpose: "register", consumedAt: null, codeHash },
+      });
+    },
+  );
 
-  return { sent: true, message: "Code sent. It expires in 10 minutes." };
+  return { sent: true, message: "Code is on its way. Check your inbox in a moment (expires in 10 minutes)." };
 }
 
 async function consumeRegisterOtp(email: string, otp: string) {
@@ -486,32 +485,31 @@ export async function sendForgotPasswordOtp(phoneRaw: string) {
   });
 
   const code = String(randomInt(100000, 1000000));
+  const codeHash = hashToken(code);
   await prisma.emailOtp.create({
     data: {
       email,
       purpose: RESET_PURPOSE,
-      codeHash: hashToken(code),
+      codeHash,
       expiresAt: new Date(Date.now() + OTP_TTL_MS),
     },
   });
 
-  try {
-    await sendMail(
-      email,
-      "Your SalesTrack password reset code",
-      `Your SalesTrack password reset code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`,
-    );
-  } catch (error) {
-    await prisma.emailOtp.deleteMany({
-      where: { email, purpose: RESET_PURPOSE, consumedAt: null, codeHash: hashToken(code) },
-    });
-    console.error(error);
-    throw badRequest("Could not send the code. Check that SMTP is configured and try again.");
-  }
+  // Return immediately; SMTP to Gmail is slow if awaited on the request.
+  queueMail(
+    email,
+    "Your SalesTrack password reset code",
+    `Your SalesTrack password reset code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.`,
+    async () => {
+      await prisma.emailOtp.deleteMany({
+        where: { email, purpose: RESET_PURPOSE, consumedAt: null, codeHash },
+      });
+    },
+  );
 
   return {
     sent: true,
-    message: `Code sent to ${maskEmail(email)}. Use the newest email only. It expires in 10 minutes.`,
+    message: `Code is on its way to ${maskEmail(email)}. Check inbox shortly. Use the newest email only.`,
   };
 }
 
