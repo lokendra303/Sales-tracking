@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { FollowUpType, type RoleCode } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
@@ -6,11 +7,14 @@ import { isManager } from "../crm/crm.helpers.js";
 import { parseDay } from "../beat/beat.helpers.js";
 import { asNumber, dayBounds, haversineMeters, publicVisit, tomorrowMorning } from "./visits.helpers.js";
 
+const MAX_DEMO_PHOTOS = 6;
+
 const visitInclude = {
   user: { select: { id: true, name: true } },
   lead: { select: { id: true, name: true, phone: true, address: true, city: true, latitude: true, longitude: true } },
   customer: { select: { id: true, name: true, phone: true, address: true, city: true, latitude: true, longitude: true } },
   sales: { select: { id: true, billPhotoPath: true }, orderBy: { createdAt: "desc" as const }, take: 1 },
+  demoPhotos: { select: { id: true, createdAt: true }, orderBy: { id: "asc" as const } },
 };
 
 function visitScope(tenantId: number, userId: number, roles: RoleCode[]) {
@@ -425,6 +429,92 @@ export async function getPhotoPath(tenantId: number, userId: number, roles: Role
   });
   if (!visit?.photoPath) throw notFound("Place photo not found.");
   return path.resolve(visit.photoPath);
+}
+
+export async function saveDemoPhoto(input: {
+  tenantId: number;
+  userId: number;
+  roles: RoleCode[];
+  visitId: number;
+  photoPath: string;
+}) {
+  const visit = await prisma.visit.findFirst({
+    where: { id: input.visitId, ...visitScope(input.tenantId, input.userId, input.roles) },
+    include: { demoPhotos: { select: { id: true } } },
+  });
+  if (!visit) throw notFound("Visit not found.");
+  if (visit.status !== "IN_PROGRESS") throw badRequest("This visit is already finished.");
+  if (visit.userId !== input.userId && !isManager(input.roles)) throw forbidden();
+  if (visit.demoPhotos.length >= MAX_DEMO_PHOTOS) {
+    throw badRequest(`You can add up to ${MAX_DEMO_PHOTOS} gallery photos.`);
+  }
+
+  await prisma.visitDemoPhoto.create({
+    data: {
+      tenantId: input.tenantId,
+      visitId: visit.id,
+      path: input.photoPath,
+    },
+  });
+
+  const updated = await prisma.visit.findFirst({
+    where: { id: visit.id },
+    include: visitInclude,
+  });
+  return publicVisit(updated!);
+}
+
+export async function getDemoPhotoPath(
+  tenantId: number,
+  userId: number,
+  roles: RoleCode[],
+  visitId: number,
+  photoId: number,
+) {
+  const visit = await prisma.visit.findFirst({
+    where: { id: visitId, ...visitScope(tenantId, userId, roles) },
+  });
+  if (!visit) throw notFound("Visit not found.");
+  const photo = await prisma.visitDemoPhoto.findFirst({
+    where: { id: photoId, visitId, tenantId },
+  });
+  if (!photo?.path) throw notFound("Gallery photo not found.");
+  return path.resolve(photo.path);
+}
+
+export async function deleteDemoPhoto(input: {
+  tenantId: number;
+  userId: number;
+  roles: RoleCode[];
+  visitId: number;
+  photoId: number;
+}) {
+  const visit = await prisma.visit.findFirst({
+    where: { id: input.visitId, ...visitScope(input.tenantId, input.userId, input.roles) },
+  });
+  if (!visit) throw notFound("Visit not found.");
+  if (visit.userId !== input.userId && !isManager(input.roles)) throw forbidden();
+  if (visit.status !== "IN_PROGRESS" && !isManager(input.roles)) {
+    throw badRequest("Gallery photos can only be removed while the visit is open.");
+  }
+
+  const photo = await prisma.visitDemoPhoto.findFirst({
+    where: { id: input.photoId, visitId: visit.id, tenantId: input.tenantId },
+  });
+  if (!photo) throw notFound("Gallery photo not found.");
+
+  await prisma.visitDemoPhoto.delete({ where: { id: photo.id } });
+  try {
+    if (photo.path && fs.existsSync(photo.path)) fs.unlinkSync(photo.path);
+  } catch {
+    // ignore missing file
+  }
+
+  const updated = await prisma.visit.findFirst({
+    where: { id: visit.id },
+    include: visitInclude,
+  });
+  return publicVisit(updated!);
 }
 
 export async function completeVisit(input: {

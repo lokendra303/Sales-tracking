@@ -5,6 +5,7 @@ import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/componen
 import { useAuth } from "@/lib/auth";
 import { api, apiUpload, isOfflineError, type Sale } from "@/lib/api";
 import { useOffline } from "@/lib/offline";
+import { ensureGalleryAccess } from "@/lib/gallery";
 import { keepPhoto } from "@/lib/photos";
 import { colors, typo } from "@/lib/theme";
 
@@ -36,6 +37,22 @@ export default function RecordSaleScreen() {
       if (!shot.canceled && shot.assets[0]) setBill(shot.assets[0].uri);
     } catch {
       Alert.alert("Camera", "Could not open the camera. Try again.");
+    }
+  }
+
+  async function pickBillFromGallery() {
+    try {
+      const allowed = await ensureGalleryAccess("attach a bill photo from your gallery");
+      if (!allowed) return;
+      const ImagePicker = await import("expo-image-picker");
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.55,
+        allowsEditing: false,
+      });
+      if (!picked.canceled && picked.assets[0]) setBill(picked.assets[0].uri);
+    } catch {
+      Alert.alert("Gallery", "Could not open the photo gallery. Try again.");
     }
   }
 
@@ -156,9 +173,10 @@ export default function RecordSaleScreen() {
         <Text style={styles.cardTitle}>Bill photo (optional)</Text>
         {bill ? <Image source={{ uri: bill }} style={styles.photo} resizeMode="cover" accessibilityLabel="Bill photo" /> : null}
         <ActionRow>
-          <Button title={bill ? "Retake bill photo" : "Add bill photo"} tone="outline" flex onPress={takeBill} disabled={busy} />
-          {bill ? <Button title="Remove" tone="ghost" flex onPress={() => setBill(null)} disabled={busy} /> : null}
+          <Button title={bill ? "Retake camera" : "Camera"} tone="outline" flex onPress={takeBill} disabled={busy} />
+          <Button title="Gallery" tone="outline" flex onPress={pickBillFromGallery} disabled={busy} />
         </ActionRow>
+        {bill ? <Button title="Remove bill photo" tone="ghost" onPress={() => setBill(null)} disabled={busy} /> : null}
       </Card>
       <Button title="Save sale" tone="green" onPress={save} loading={busy} />
       <Text style={styles.hint}>Bill photo is optional. If there is no network, the sale and photo stay on this phone and send later.</Text>

@@ -11,7 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.salestrack.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "SalesTrack needs access to your photos and videos to attach optional demo and bill images from your gallery.",
+        "NSPhotoLibraryAddUsageDescription": "SalesTrack may save visit photos on this phone when offline."
       }
     },
     "android": {
@@ -22,14 +24,14 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_EXTERNAL_STORAGE"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_AUDIO"
       ],
       "adaptiveIcon": {
@@ -75,8 +77,8 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "SalesTrack takes a place photo now to prove this visit.",
-          "photosPermission": false
+          "cameraPermission": "SalesTrack takes a live place photo to prove this visit.",
+          "photosPermission": "SalesTrack needs access to your photos and videos to attach optional demo and bill images from your gallery."
         }
       ],
       "./plugins/without-firebase-init.js",

@@ -1,19 +1,31 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LiveCamera } from "@/components/live-camera";
 import { ServerPhoto } from "@/components/server-photo";
 import { loadLocation } from "@/lib/device-location";
 import { ActionRow, Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { api, apiUpload, isOfflineError, loadBillPhoto, loadVisitPhoto, serverReachable, type Visit } from "@/lib/api";
+import {
+  api,
+  apiUpload,
+  isOfflineError,
+  loadBillPhoto,
+  loadDemoPhoto,
+  loadVisitPhoto,
+  serverReachable,
+  type Visit,
+} from "@/lib/api";
 import { assertNearShop, finishReading } from "@/lib/finish-visit";
 import { haversineMeters } from "@/lib/geo";
 import { useOffline } from "@/lib/offline";
+import { ensureGalleryAccess } from "@/lib/gallery";
 import { keepPhoto } from "@/lib/photos";
 import { openCall, openNavigate, openWhatsApp, when } from "@/lib/format";
 import { isManager, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
+
+const MAX_DEMO_PHOTOS = 6;
 
 export default function VisitScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -26,6 +38,7 @@ export default function VisitScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [demoUris, setDemoUris] = useState<Record<number, string>>({});
   const load = useCallback(async () => {
     if (!accessToken || !id) return;
     setLoading(true);
@@ -44,6 +57,27 @@ export default function VisitScreen() {
     useCallback(() => {
       load();
     }, [load]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!accessToken || !visit?.demoPhotos?.length) {
+        setDemoUris({});
+        return;
+      }
+      let live = true;
+      (async () => {
+        const next: Record<number, string> = {};
+        for (const photo of visit.demoPhotos ?? []) {
+          const uri = await loadDemoPhoto(visit.id, photo.id, accessToken).catch(() => null);
+          if (uri) next[photo.id] = uri;
+        }
+        if (live) setDemoUris(next);
+      })();
+      return () => {
+        live = false;
+      };
+    }, [accessToken, visit?.id, visit?.demoPhotos?.map((p) => p.id).join(",")]),
   );
 
   async function saveLivePhoto(fileUri: string) {
@@ -102,6 +136,77 @@ export default function VisitScreen() {
       setVisit(await api<Visit>(`/visits/${visit.id}/confirm`, { method: "POST", token: accessToken }));
     } catch (err) {
       Alert.alert("Could not confirm", err instanceof Error ? err.message : "Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickDemoPhotos() {
+    if (!accessToken || !visit) return;
+    const have = visit.demoPhotos?.length ?? 0;
+    const left = MAX_DEMO_PHOTOS - have;
+    if (left <= 0) {
+      Alert.alert("Limit reached", `You can add up to ${MAX_DEMO_PHOTOS} gallery photos.`);
+      return;
+    }
+    try {
+      const allowed = await ensureGalleryAccess("attach demo photos from your gallery");
+      if (!allowed) return;
+      const ImagePicker = await import("expo-image-picker");
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: true,
+        selectionLimit: left,
+        quality: 0.55,
+        allowsEditing: false,
+      });
+      if (picked.canceled || !picked.assets.length) return;
+      setBusy(true);
+      let uploaded = 0;
+      for (const asset of picked.assets.slice(0, left)) {
+        const kept = await keepPhoto(asset.uri, `demo-${visit.id}-${Date.now()}-${uploaded}`);
+        try {
+          await apiUpload<Visit>(`/visits/${visit.id}/demo-photos`, {
+            token: accessToken,
+            fileUri: kept,
+          });
+          uploaded += 1;
+        } catch (err) {
+          if (isOfflineError(err) && !(await serverReachable())) {
+            await offline.enqueue({
+              kind: "visit-demo",
+              label: `Demo photo · ${visit.name}`,
+              path: `/visits/${visit.id}/demo-photos`,
+              fileUri: kept,
+            });
+            uploaded += 1;
+          } else {
+            Alert.alert(
+              "Could not upload",
+              err instanceof Error ? err.message : "One gallery photo did not upload.",
+            );
+            break;
+          }
+        }
+      }
+      await load();
+      if (uploaded && !(await serverReachable())) {
+        Alert.alert("Saved on this phone", "Gallery photos will upload when you are back on Wi-Fi.");
+      }
+    } catch {
+      Alert.alert("Gallery", "Could not open the photo gallery. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeDemoPhoto(photoId: number) {
+    if (!accessToken || !visit) return;
+    setBusy(true);
+    try {
+      setVisit(await api<Visit>(`/visits/${visit.id}/demo-photos/${photoId}`, { method: "DELETE", token: accessToken }));
+    } catch (err) {
+      Alert.alert("Could not remove", err instanceof Error ? err.message : "Try again.");
     } finally {
       setBusy(false);
     }
@@ -273,12 +378,56 @@ export default function VisitScreen() {
             ) : null}
         </Card>
 
+      <Card>
+        <Text style={styles.cardTitle}>Demo photos (optional)</Text>
+        <Text style={typo.muted}>
+          Extra product or shelf photos from your gallery. Not a substitute for the live place proof.
+        </Text>
+        {(visit.demoPhotos?.length ?? 0) > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.demoRow}>
+            {(visit.demoPhotos ?? []).map((photo) => (
+              <View key={photo.id} style={styles.demoItem}>
+                {demoUris[photo.id] ? (
+                  <Image source={{ uri: demoUris[photo.id] }} style={styles.demoThumb} accessibilityLabel="Demo photo" />
+                ) : (
+                  <View style={[styles.demoThumb, styles.demoEmpty]}>
+                    <ActivityIndicator color={colors.blue} />
+                  </View>
+                )}
+                {open && sales ? (
+                  <Pressable onPress={() => removeDemoPhoto(photo.id)} disabled={busy}>
+                    <Text style={styles.demoRemove}>Remove</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+          <Text style={typo.muted}>No gallery photos yet.</Text>
+        )}
+        {open && sales ? (
+          <Button
+            title={
+              (visit.demoPhotos?.length ?? 0) >= MAX_DEMO_PHOTOS
+                ? `Gallery full (${MAX_DEMO_PHOTOS})`
+                : `Add from gallery (${visit.demoPhotos?.length ?? 0}/${MAX_DEMO_PHOTOS})`
+            }
+            tone="outline"
+            onPress={pickDemoPhotos}
+            disabled={busy || (visit.demoPhotos?.length ?? 0) >= MAX_DEMO_PHOTOS}
+          />
+        ) : null}
+      </Card>
+
       {open && sales ? (
         <>
           <Field label="Visit note" value={notes} onChangeText={setNotes} multiline placeholder="What happened" />
           <Button title="Complete visit" tone="green" onPress={() => complete("SUCCESS")} disabled={busy} />
           <Button title="Customer not there" tone="ghost" onPress={() => complete("UNAVAILABLE")} disabled={busy} />
-          <Text style={styles.hint}>Not there = no photo, follow-up tomorrow. Success needs the place photo. Either way, finish within 300 m of the shop pin.</Text>
+          <Text style={styles.hint}>
+            Place proof (live camera) is required for a successful visit. Gallery demo photos and bill photo are optional.
+            Finish within 300 m of the shop pin.
+          </Text>
         </>
       ) : null}
       {open && manager ? (
@@ -379,4 +528,9 @@ const styles = StyleSheet.create({
   ok: { color: colors.green, fontWeight: "800" },
   warn: { color: "#92400E", fontWeight: "800" },
   hint: { ...typo.muted, textAlign: "center" },
+  demoRow: { gap: 10, paddingVertical: 4 },
+  demoItem: { width: 112, gap: 4 },
+  demoThumb: { width: 112, height: 112, borderRadius: 12, backgroundColor: colors.line },
+  demoEmpty: { alignItems: "center", justifyContent: "center" },
+  demoRemove: { color: colors.red, fontWeight: "700", fontSize: 12, textAlign: "center" },
 });

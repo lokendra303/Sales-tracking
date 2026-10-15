@@ -216,6 +216,8 @@ input:focus, .search:focus, select:focus, textarea:focus {
 .page > h1 { margin-top: 4px; }
 .map { width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #d9d2c4; }
 .proof { width: 100%; max-height: 360px; object-fit: cover; border-radius: 8px; }
+.demo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.proof.demo { max-height: 160px; }
 .alert { background: #fff6df; border-color: #e4c56b; margin-top: 20px; }
 .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
 .toolbar .search { margin: 0; }

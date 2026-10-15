@@ -11,6 +11,7 @@ export function VisitDetailPage() {
   const [visit, setVisit] = useState<Visit | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [bill, setBill] = useState<string | null>(null);
+  const [demos, setDemos] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -23,6 +24,16 @@ export function VisitDetailPage() {
     }
     if (data.saleId && data.saleHasBill) {
       setBill(await apiBlob(`/sales/${data.saleId}/bill`, accessToken).catch(() => null));
+    }
+    if (data.demoPhotos?.length) {
+      const urls = await Promise.all(
+        data.demoPhotos.map((item) =>
+          apiBlob(`/visits/${data.id}/demo-photos/${item.id}`, accessToken).catch(() => null),
+        ),
+      );
+      setDemos(urls.filter((url): url is string => Boolean(url)));
+    } else {
+      setDemos([]);
     }
   }
 
@@ -111,9 +122,19 @@ export function VisitDetailPage() {
           </p>
           {visit.notes ? <p>{visit.notes}</p> : null}
           {visit.saleAmount != null ? <p className="on">Sale ₹{visit.saleAmount}</p> : null}
+          {demos.length ? (
+            <>
+              <h3>Demo photos</h3>
+              <div className="demo-grid">
+                {demos.map((src, index) => (
+                  <img key={src} className="proof demo" src={src} alt={`Demo photo ${index + 1}`} />
+                ))}
+              </div>
+            </>
+          ) : null}
           {bill ? (
             <>
-              <h3>Bill photo</h3>
+              <h3>Bill photo (optional)</h3>
               <img className="proof" src={bill} alt="Bill photo" />
             </>
           ) : null}

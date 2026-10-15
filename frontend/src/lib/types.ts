@@ -48,6 +48,7 @@ export type Visit = {
   collectionAmount: number | null;
   saleId: number | null;
   saleHasBill?: boolean;
+  demoPhotos?: { id: number; createdAt: string }[];
 };
 
 export type Sale = {

@@ -130,6 +130,7 @@ export type Visit = {
   collectionAmount?: number | null;
   saleId?: number | null;
   saleHasBill?: boolean;
+  demoPhotos?: { id: number; createdAt: string }[];
 };
 
 export type Sale = {
@@ -536,6 +537,10 @@ export function loadVisitPhoto(visitId: number, token: string, version?: string 
 
 export function loadBillPhoto(saleId: number, token: string, fresh = false) {
   return loadPhoto(`/sales/${saleId}/bill`, `bill-${saleId}`, token, fresh);
+}
+
+export async function loadDemoPhoto(visitId: number, photoId: number, token: string, fresh = false) {
+  return loadPhoto(`/visits/${visitId}/demo-photos/${photoId}`, `demo-${visitId}-${photoId}`, token, fresh);
 }
 
 async function fetchPhoto(path: string, token: string) {

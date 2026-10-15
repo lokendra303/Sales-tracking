@@ -151,6 +151,71 @@ visitsRouter.post(
   }),
 );
 
+const demoUploadDir = path.resolve(process.cwd(), "uploads", "visit-demo");
+fs.mkdirSync(demoUploadDir, { recursive: true });
+
+const demoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, demoUploadDir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || "").toLowerCase() || ".jpg";
+      cb(null, `${req.params.id}-demo-${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 6 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.mimetype)) {
+      cb(badRequest("Gallery photo must be an image."));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+visitsRouter.post(
+  "/visits/:id/demo-photos",
+  demoUpload.single("photo"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("Choose a photo from the gallery.");
+    const data = await visits.saveDemoPhoto({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId,
+      roles: req.auth!.roles,
+      visitId: Number(req.params.id),
+      photoPath: req.file.path,
+    });
+    res.status(201).json({ success: true, data });
+  }),
+);
+
+visitsRouter.get(
+  "/visits/:id/demo-photos/:photoId",
+  asyncHandler(async (req, res) => {
+    const file = await visits.getDemoPhotoPath(
+      req.auth!.tenantId,
+      req.auth!.userId,
+      req.auth!.roles,
+      Number(req.params.id),
+      Number(req.params.photoId),
+    );
+    res.sendFile(file);
+  }),
+);
+
+visitsRouter.delete(
+  "/visits/:id/demo-photos/:photoId",
+  asyncHandler(async (req, res) => {
+    const data = await visits.deleteDemoPhoto({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId,
+      roles: req.auth!.roles,
+      visitId: Number(req.params.id),
+      photoId: Number(req.params.photoId),
+    });
+    res.json({ success: true, data });
+  }),
+);
+
 visitsRouter.post(
   "/visits/:id/complete",
   asyncHandler(async (req, res) => {

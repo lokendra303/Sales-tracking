@@ -63,6 +63,7 @@ export function publicVisit(row: {
   customerId: number | null;
   beatStopId: number | null;
   sales?: { id: number; billPhotoPath?: string | null }[];
+  demoPhotos?: { id: number; createdAt: Date }[];
   user?: { id: number; name: string } | null;
   lead?: { id: number; name: string; phone: string; address: string | null; city: string | null; latitude: unknown; longitude: unknown } | null;
   customer?: { id: number; name: string; phone: string; address: string | null; city: string | null; latitude: unknown; longitude: unknown } | null;
@@ -117,5 +118,9 @@ export function publicVisit(row: {
     collectionAmount: asNumber(row.collectionAmount),
     saleId: row.sales?.[0]?.id ?? null,
     saleHasBill: Boolean(row.sales?.[0]?.billPhotoPath),
+    demoPhotos: (row.demoPhotos ?? []).map((photo) => ({
+      id: photo.id,
+      createdAt: photo.createdAt,
+    })),
   };
 }

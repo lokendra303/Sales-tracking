@@ -406,10 +406,26 @@ model Visit {
   lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   beatStop BeatStop? @relation(fields: [beatStopId], references: [id], onDelete: SetNull)
-  sales    Sale[]
+  sales      Sale[]
+  demoPhotos VisitDemoPhoto[]
 
   @@index([tenantId, userId, checkedInAt])
   @@map("visit")
+}
+
+/** Optional gallery photos (product demos, shelves, etc). Place proof photo stays on Visit.photoPath. */
+model VisitDemoPhoto {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  visitId   Int
+  path      String
+  createdAt DateTime @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
+  @@index([tenantId, visitId])
+  @@map("visitdemophoto")
 }
 
 model Sale {

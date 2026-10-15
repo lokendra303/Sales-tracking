@@ -8,7 +8,7 @@ import { useAuth } from "./auth";
 
 export type OfflineJob = {
   id: string;
-  kind: "lead" | "follow-up" | "check-in" | "visit-complete" | "visit-photo" | "sale" | "sale-bill" | "gps";
+  kind: "lead" | "follow-up" | "check-in" | "visit-complete" | "visit-photo" | "visit-demo" | "sale" | "sale-bill" | "gps";
   label: string;
   path: string;
   method?: "POST";
