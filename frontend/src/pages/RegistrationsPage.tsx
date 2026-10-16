@@ -58,12 +58,23 @@ function isSuspended(status: string) {
   return status === "inactive" || status === "suspended";
 }
 
+type DeleteFlow = {
+  tenantId: number;
+  companyName: string;
+  managerName: string | null;
+  hint: string;
+};
+
 export function RegistrationsPage() {
   const { accessToken } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deleteFlow, setDeleteFlow] = useState<DeleteFlow | null>(null);
+  const [deleteOtp, setDeleteOtp] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function load() {
     if (!accessToken) return;
@@ -87,15 +98,25 @@ export function RegistrationsPage() {
   async function decide(tenantId: number, action: "approve" | "reject") {
     if (!accessToken) return;
     setError("");
+    setNotice("");
     setBusy(true);
     try {
-      await api(`/registrations/${tenantId}/decide`, {
+      const data = await api<{ status: string; emailed?: boolean }>(`/registrations/${tenantId}/decide`, {
         method: "POST",
         token: accessToken,
         body: JSON.stringify({ action }),
       });
       await load();
       if (detail?.tenantId === tenantId) await openDetail(tenantId);
+      if (action === "approve") {
+        setNotice(
+          data.emailed
+            ? "Approved. An authorisation email was sent to the manager."
+            : "Approved. No manager email on file, so no email was sent.",
+        );
+      } else {
+        setNotice(data.emailed ? "Declined. The manager was emailed." : "Declined.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update.");
     } finally {
@@ -124,6 +145,77 @@ export function RegistrationsPage() {
     }
   }
 
+  async function requestDelete(tenantId: number, companyName: string) {
+    if (!accessToken) return;
+    if (
+      !window.confirm(
+        `Delete "${companyName}" permanently?\n\nA confirmation code will be emailed to your admin inbox. The company, manager, team, leads, visits and sales will all be removed.`,
+      )
+    ) {
+      return;
+    }
+    setError("");
+    setNotice("");
+    setDeleteBusy(true);
+    try {
+      const data = await api<{
+        tenantId: number;
+        companyName: string;
+        managerName: string | null;
+        message: string;
+      }>(`/registrations/${tenantId}/delete/request`, {
+        method: "POST",
+        token: accessToken,
+      });
+      setDeleteFlow({
+        tenantId: data.tenantId,
+        companyName: data.companyName,
+        managerName: data.managerName,
+        hint: data.message,
+      });
+      setDeleteOtp("");
+      setNotice(data.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send confirmation code.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!accessToken || !deleteFlow) return;
+    if (!/^\d{6}$/.test(deleteOtp.trim())) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setDeleteBusy(true);
+    try {
+      const data = await api<{ message: string; managerNotified?: boolean }>(
+        `/registrations/${deleteFlow.tenantId}/delete/confirm`,
+        {
+          method: "POST",
+          token: accessToken,
+          body: JSON.stringify({ otp: deleteOtp.trim() }),
+        },
+      );
+      if (detail?.tenantId === deleteFlow.tenantId) setDetail(null);
+      setDeleteFlow(null);
+      setDeleteOtp("");
+      await load();
+      setNotice(
+        data.managerNotified
+          ? `${data.message} The manager was emailed.`
+          : data.message,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   function statusLabel(status: string) {
     if (status === "active") return "Active";
     if (isSuspended(status)) return "Suspended";
@@ -136,9 +228,61 @@ export function RegistrationsPage() {
       <p className="kicker">System admin</p>
       <h1>Managers & companies</h1>
       <p className="muted">
-        View full manager and company details. Approve new registrations, then suspend or restore anytime.
+        View full manager and company details. Approve, suspend, restore, or permanently delete. Deleting emails a
+        confirmation code to your admin inbox first.
       </p>
       {error ? <p className="error">{error}</p> : null}
+      {notice ? <p className="on">{notice}</p> : null}
+
+      {deleteFlow ? (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <p className="kicker">Confirm deletion</p>
+          <h2>Delete {deleteFlow.companyName}</h2>
+          <p className="muted">
+            {deleteFlow.hint}
+            {deleteFlow.managerName ? ` Manager: ${deleteFlow.managerName}.` : ""}
+          </p>
+          <div className="form" style={{ maxWidth: 360, marginTop: 12 }}>
+            <input
+              value={deleteOtp}
+              onChange={(e) => setDeleteOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="6-digit code from your email"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              disabled={deleteBusy}
+            />
+            <div className="seq-btns">
+              <button
+                className="btn red"
+                type="button"
+                disabled={deleteBusy || deleteOtp.length !== 6}
+                onClick={() => confirmDelete()}
+              >
+                {deleteBusy ? "Deleting…" : "Confirm permanent delete"}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={deleteBusy}
+                onClick={() => requestDelete(deleteFlow.tenantId, deleteFlow.companyName)}
+              >
+                Resend code
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={deleteBusy}
+                onClick={() => {
+                  setDeleteFlow(null);
+                  setDeleteOtp("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="table-scroll">
         <table className="table">
@@ -190,7 +334,7 @@ export function RegistrationsPage() {
                 </td>
                 <td>
                   <div className="seq-btns">
-                    <button className="btn" type="button" disabled={busy} onClick={() => openDetail(row.tenantId)}>
+                    <button className="btn blue" type="button" disabled={busy} onClick={() => openDetail(row.tenantId)}>
                       Details
                     </button>
                     {row.status === "pending" ? (
@@ -231,6 +375,16 @@ export function RegistrationsPage() {
                         onClick={() => setSuspended(row.tenantId, false)}
                       >
                         Restore
+                      </button>
+                    ) : null}
+                    {row.slug !== "demo-company" ? (
+                      <button
+                        className="btn red"
+                        type="button"
+                        disabled={busy || deleteBusy}
+                        onClick={() => requestDelete(row.tenantId, row.companyName)}
+                      >
+                        Delete
                       </button>
                     ) : null}
                   </div>
@@ -351,6 +505,16 @@ export function RegistrationsPage() {
             ) : detail.status === "active" ? (
               <button className="btn red" type="button" disabled={busy} onClick={() => setSuspended(detail.tenantId, true)}>
                 Suspend company
+              </button>
+            ) : null}
+            {detail.slug !== "demo-company" ? (
+              <button
+                className="btn red"
+                type="button"
+                disabled={busy || deleteBusy}
+                onClick={() => requestDelete(detail.tenantId, detail.companyName)}
+              >
+                Delete permanently
               </button>
             ) : null}
           </div>

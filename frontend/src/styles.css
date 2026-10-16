@@ -105,8 +105,49 @@ a:hover { color: var(--teal-2); }
   box-shadow: var(--shadow);
 }
 .form { display: grid; gap: 12px; width: min(420px, 92vw); }
-.form.wide { width: 100%; max-width: 760px; }
+.form.wide { width: 100%; max-width: 920px; }
 .form label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+.profile-hero { margin-bottom: 16px; }
+.form-compact { gap: 10px; width: 100%; max-width: none; }
+.form-compact .grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+@media (max-width: 980px) {
+  .profile-grid { grid-template-columns: 1fr; }
+}
+.form-compact label { gap: 4px; font-size: 12px; }
+.form-compact input,
+.form-compact select,
+.form-compact textarea,
+.form-compact .password-field input {
+  padding: 9px 12px;
+}
+.form-compact .more-toggle {
+  justify-self: start;
+  padding: 0;
+  margin: 0;
+}
+.form-compact .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 2px;
+}
+@media (max-width: 900px) {
+  .form-compact .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .form-compact .grid-3 { grid-template-columns: 1fr; }
+}
 .check-row {
   display: flex !important;
   flex-direction: row !important;
@@ -155,17 +196,28 @@ input:focus, .search:focus, select:focus, textarea:focus {
 .eye:hover { background: #f3eee4; color: var(--text); }
 
 .btn {
-  border: 0;
+  border: 1px solid var(--teal);
   border-radius: 8px;
-  padding: 12px 18px;
-  color: #fff;
+  padding: 11px 18px;
+  color: var(--teal);
+  background: #fff;
   font-weight: 700;
   cursor: pointer;
   font-family: inherit;
 }
-.btn.blue, .btn.green { background: var(--teal); }
-.btn.blue:hover, .btn.green:hover { background: var(--teal-2); }
-.btn.red { background: var(--danger); }
+.btn:hover { background: rgba(15, 76, 92, 0.08); }
+.btn.blue, .btn.green {
+  border-color: transparent;
+  background: var(--teal);
+  color: #fff;
+}
+.btn.blue:hover, .btn.green:hover { background: var(--teal-2); color: #fff; }
+.btn.red {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+.btn.red:hover { filter: brightness(0.95); color: #fff; }
 .btn:disabled { opacity: 0.55; }
 .link { background: none; border: 0; color: var(--teal); font-weight: 700; cursor: pointer; font-family: inherit; }
 

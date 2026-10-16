@@ -75,7 +75,7 @@ export default function TeamScreen() {
           title={admin ? "Managers" : "Team"}
           subtitle={admin ? "System admin — managers only" : "Your sales executives"}
           right={
-            <Pressable style={styles.add} onPress={() => router.push("/user/new")} accessibilityLabel={admin ? "Add manager" : "Add sales executive"}>
+            <Pressable style={styles.add} onPress={() => router.push("/user/new")} accessibilityLabel={admin ? "Add manager" : "Add employee"}>
               <Ionicons name="add" size={22} color="#fff" />
             </Pressable>
           }

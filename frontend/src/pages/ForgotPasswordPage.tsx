@@ -29,11 +29,16 @@ export function ForgotPasswordPage() {
     setNotice("");
     setBusy(true);
     try {
-      const data = await api<{ message: string }>("/auth/forgot-password", {
+      const data = await api<{ sent?: boolean; message: string }>("/auth/forgot-password", {
         method: "POST",
         body: JSON.stringify({ phone }),
       });
       setNotice(data.message);
+      if (data.sent === false) {
+        // Unknown mobile — stay here; do not pretend a code is coming.
+        setStep("request");
+        return;
+      }
       setStep("reset");
       setResendIn(RESEND_SEC);
       setOtp("");

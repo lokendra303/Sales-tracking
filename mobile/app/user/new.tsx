@@ -53,11 +53,11 @@ export default function NewUserScreen() {
   }
 
   return (
-    <Screen keyboard header={<ScreenHeader title={admin ? "Add manager" : "Add sales executive"} back align="center" fallback="/team" />}>
+    <Screen keyboard header={<ScreenHeader title={admin ? "Add manager" : "Add employee"} back align="center" fallback="/team" />}>
       <Text style={typo.muted}>
         {admin
-          ? "System admins approve manager registrations on the desk. They do not add sales executives here."
-          : "All fields marked * are required. The salesperson logs in on the phone app only."}
+          ? "System admins approve manager registrations on the desk. They do not add employees here."
+          : "All fields marked * are required. The employee logs in on the phone app only."}
       </Text>
       {admin ? null : (
         <>
@@ -78,7 +78,7 @@ export default function NewUserScreen() {
           <Field label="Joining date (YYYY-MM-DD)" value={joiningDate} onChangeText={setJoiningDate} placeholder="2026-10-15" autoCapitalize="none" />
           <Field label="Address" value={address} onChangeText={setAddress} placeholder="Optional" multiline />
           <PasswordField label="App password *" value={password} onChangeText={setPassword} />
-          <Button title="Save sales executive" tone="green" onPress={save} loading={loading} />
+          <Button title="Save employee" tone="green" onPress={save} loading={loading} />
         </>
       )}
     </Screen>

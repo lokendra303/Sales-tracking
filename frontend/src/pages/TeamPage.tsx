@@ -59,6 +59,7 @@ export function TeamPage() {
   const [error, setError] = useState("");
   const [issued, setIssued] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showMore, setShowMore] = useState(false);
 
   async function load() {
     if (!accessToken) return;
@@ -77,6 +78,7 @@ export function TeamPage() {
     setEditingId(person.id);
     setIssued("");
     setError("");
+    setShowMore(Boolean(person.address || person.joiningDate));
     setForm({
       name: person.name,
       phone: person.phone,
@@ -95,6 +97,7 @@ export function TeamPage() {
     setEditingId(null);
     setForm(emptyForm);
     setError("");
+    setShowMore(false);
   }
 
   async function onSubmit(event: FormEvent) {
@@ -120,7 +123,7 @@ export function TeamPage() {
             status: form.status,
           }),
         });
-        setIssued("Salesperson details updated.");
+        setIssued("Employee details updated.");
         cancelEdit();
       } else {
         await api("/users", {
@@ -138,8 +141,9 @@ export function TeamPage() {
             joiningDate: form.joiningDate || undefined,
           }),
         });
-        setIssued(`Give this salesperson ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`);
+        setIssued(`Give this employee ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`);
         setForm(emptyForm);
+        setShowMore(false);
       }
       await load();
     } catch (err) {
@@ -153,14 +157,11 @@ export function TeamPage() {
     <div className="page">
       <p className="kicker">Sales team</p>
       <h1>Team</h1>
-      <p className="muted">
-        Add every sales executive with employee details. You can edit phone and profile later. Open an executive to
-        review only that person’s leads and visits.
-      </p>
+      <p className="muted">Add employees for the phone app. Edit any row later.</p>
 
-      <form className="card form" onSubmit={onSubmit}>
-        <h2>{editingId ? "Edit salesperson" : "Add salesperson"}</h2>
-        <div className="grid-2">
+      <form className="card form wide form-compact" onSubmit={onSubmit}>
+        <h2>{editingId ? "Edit employee" : "Add employee"}</h2>
+        <div className="grid-3">
           <label>
             Full name *
             <input value={form.name} onChange={(e) => setField("name", e.target.value)} required />
@@ -197,10 +198,6 @@ export function TeamPage() {
             City *
             <input value={form.city} onChange={(e) => setField("city", e.target.value)} required />
           </label>
-          <label>
-            Joining date
-            <input type="date" value={form.joiningDate} onChange={(e) => setField("joiningDate", e.target.value)} />
-          </label>
           {editingId ? (
             <label>
               Status
@@ -216,13 +213,26 @@ export function TeamPage() {
             </label>
           )}
         </div>
-        <label>
-          Address
-          <textarea value={form.address} onChange={(e) => setField("address", e.target.value)} rows={2} />
-        </label>
-        <div className="row-form">
+
+        <button type="button" className="link more-toggle" onClick={() => setShowMore((value) => !value)}>
+          {showMore ? "Hide optional details" : "More details (joining date, address)"}
+        </button>
+        {showMore ? (
+          <div className="grid-3">
+            <label>
+              Joining date
+              <input type="date" value={form.joiningDate} onChange={(e) => setField("joiningDate", e.target.value)} />
+            </label>
+            <label style={{ gridColumn: "span 2" }}>
+              Address
+              <input value={form.address} onChange={(e) => setField("address", e.target.value)} />
+            </label>
+          </div>
+        ) : null}
+
+        <div className="actions">
           <button className="btn green" disabled={busy}>
-            {busy ? "Saving…" : editingId ? "Save changes" : "Add salesperson"}
+            {busy ? "Saving…" : editingId ? "Save changes" : "Add employee"}
           </button>
           {editingId ? (
             <button type="button" className="btn" onClick={cancelEdit}>

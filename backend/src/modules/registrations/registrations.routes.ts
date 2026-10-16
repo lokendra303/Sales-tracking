@@ -49,3 +49,24 @@ registrationsRouter.post(
     res.json({ success: true, data });
   }),
 );
+
+registrationsRouter.post(
+  "/:tenantId/delete/request",
+  asyncHandler(async (req, res) => {
+    const data = await registrations.requestTenantDelete(Number(req.params.tenantId), req.auth!.userId);
+    res.json({ success: true, data });
+  }),
+);
+
+registrationsRouter.post(
+  "/:tenantId/delete/confirm",
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit confirmation code."),
+      })
+      .parse(req.body);
+    const data = await registrations.confirmTenantDelete(Number(req.params.tenantId), req.auth!.userId, body.otp);
+    res.json({ success: true, data });
+  }),
+);

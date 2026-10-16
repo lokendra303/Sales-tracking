@@ -97,7 +97,7 @@ export default function EditUserScreen() {
 
   return (
     <Screen keyboard header={<ScreenHeader title={person.name} back align="center" fallback="/team" />}>
-      <Text style={typo.muted}>Managers can update phone and profile details for their sales executives.</Text>
+      <Text style={typo.muted}>Managers can update phone and profile details for their employees.</Text>
       <Field label="Full name *" value={name} onChangeText={setName} autoCapitalize="words" />
       <Field label="Employee ID *" value={employeeId} onChangeText={setEmployeeId} autoCapitalize="characters" />
       <Field label="Phone *" value={phone} onChangeText={setPhone} keyboardType="number-pad" digitsOnly />

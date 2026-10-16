@@ -446,12 +446,13 @@ export async function sendForgotPasswordOtp(phoneRaw: string) {
 
   let user = await findDeskUserByPhone(phone);
 
-  // Same generic reply when the account is missing, so phone numbers cannot be probed.
-  const generic = {
-    sent: true,
-    message: "If this account has a registered email, a code was sent. It expires in 10 minutes.",
-  };
-  if (!user) return generic;
+  // Unknown mobile: generic reply so random numbers cannot be probed.
+  if (!user) {
+    return {
+      sent: false,
+      message: "If this account has a registered email, a code was sent. It expires in 10 minutes.",
+    };
+  }
 
   // First-time admin email from .env if the portal never saved one.
   if (!user.email && user.platformAdmin && env.adminEmail) {
@@ -461,7 +462,11 @@ export async function sendForgotPasswordOtp(phoneRaw: string) {
       include: { roles: { include: { role: true } } },
     });
   }
-  if (!user.email) return generic;
+  if (!user.email) {
+    throw badRequest(
+      "This account has no email saved, so a reset code cannot be sent. Sign in and add an email on Account, or ask the system admin to set it.",
+    );
+  }
 
   const email = normalizeEmail(user.email);
   const latest = await prisma.emailOtp.findFirst({

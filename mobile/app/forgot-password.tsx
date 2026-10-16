@@ -29,11 +29,15 @@ export default function ForgotPasswordScreen() {
     setNotice("");
     setBusy(true);
     try {
-      const data = await api<{ message: string }>("/auth/forgot-password", {
+      const data = await api<{ sent?: boolean; message: string }>("/auth/forgot-password", {
         method: "POST",
         body: JSON.stringify({ phone }),
       });
       setNotice(data.message);
+      if (data.sent === false) {
+        setStep("request");
+        return;
+      }
       setStep("reset");
       setResendIn(RESEND_SEC);
       setOtp("");

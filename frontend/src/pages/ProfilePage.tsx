@@ -20,6 +20,7 @@ export function ProfilePage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showMore, setShowMore] = useState(false);
 
   useEffect(() => {
     setName(user?.name ?? "");
@@ -28,6 +29,7 @@ export function ProfilePage() {
     setDesignation(user?.designation ?? "");
     setCity(user?.city ?? "");
     setAddress(user?.address ?? "");
+    setShowMore(Boolean(user?.address));
   }, [user]);
 
   async function onSaveProfile(event: FormEvent) {
@@ -50,7 +52,7 @@ export function ProfilePage() {
         }),
       });
       await refreshUser();
-      setNotice("Profile saved. The next login uses this mobile number from the database — not the .env seed values.");
+      setNotice("Profile saved. Next login uses these details from the database.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update profile.");
     } finally {
@@ -77,7 +79,7 @@ export function ProfilePage() {
       setOldPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setNotice("Password updated in the database. Use it on the next login.");
+      setNotice("Password updated. Use it on the next login.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change password.");
     } finally {
@@ -89,70 +91,94 @@ export function ProfilePage() {
     <div className="page">
       <h1>Profile</h1>
       <p className="muted">
-        First-time seed from backend .env: <code>ADMIN_PHONE</code>, <code>ADMIN_PASSWORD</code>, and{" "}
-        <code>ADMIN_EMAIL</code>. Admin login needs email + mobile + password (more secure than managers). After the
-        first seed, change them here anytime. Forgot password sends an OTP to the email on this profile.
+        {admin
+          ? "Admin sign-in needs email + mobile + password. Forgot password emails the address saved here."
+          : "Update your login mobile, email, and password. Forgot password uses this email."}
       </p>
 
-      <article className="card person">
+      <article className="card person profile-hero">
         <div className="brand">
           <div className="logo">{user?.name.slice(0, 1)}</div>
           <div>
             <strong>{user?.name}</strong>
-            <div className="muted">{roleLabel(user?.roles)}</div>
+            <div className="muted">
+              {roleLabel(user?.roles)} · {user?.tenant.name} · {accessLabel(user?.roles)}
+            </div>
           </div>
         </div>
       </article>
 
-      <form className="card form" onSubmit={onSaveProfile}>
-        <h2>Account details</h2>
-        <div className="grid-2">
-          <label>
-            Full name
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
-          </label>
-          <label>
-            Mobile (login)
-            <input value={phone} onChange={(e) => setPhone(mobileDigits(e.target.value))} inputMode="numeric" required />
-          </label>
-          <label>
-            Email (password reset OTP)
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </label>
-          <label>
-            Designation
-            <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
-          </label>
-          <label>
-            City
-            <input value={city} onChange={(e) => setCity(e.target.value)} />
-          </label>
-        </div>
-        <label>
-          Address
-          <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} />
-        </label>
-        <p className="muted">Company: {user?.tenant.name}</p>
-        <p className="muted">
-          {admin
-            ? "System admin. Managers register themselves. You approve the company, not the sales team."
-            : "You manage sales executives. Field visits stay on their phones."}
-        </p>
-        <p className="muted">Access: {accessLabel(user?.roles)}</p>
-        <button className="btn green" disabled={saving}>
-          Save profile
-        </button>
-      </form>
+      <div className="profile-grid">
+        <form className="card form wide form-compact" onSubmit={onSaveProfile}>
+          <h2>Account details</h2>
+          <div className="grid-3">
+            <label>
+              Full name
+              <input value={name} onChange={(e) => setName(e.target.value)} required />
+            </label>
+            <label>
+              Mobile (login)
+              <input
+                value={phone}
+                onChange={(e) => setPhone(mobileDigits(e.target.value))}
+                inputMode="numeric"
+                required
+              />
+            </label>
+            <label>
+              Email (OTP)
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+            <label>
+              Designation
+              <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
+            </label>
+            <label>
+              City
+              <input value={city} onChange={(e) => setCity(e.target.value)} />
+            </label>
+          </div>
+          <button type="button" className="link more-toggle" onClick={() => setShowMore((value) => !value)}>
+            {showMore ? "Hide address" : "Add address"}
+          </button>
+          {showMore ? (
+            <label>
+              Address
+              <input value={address} onChange={(e) => setAddress(e.target.value)} />
+            </label>
+          ) : null}
+          <div className="actions">
+            <button className="btn green" disabled={saving}>
+              Save profile
+            </button>
+          </div>
+        </form>
 
-      <form className="card form" onSubmit={onChangePassword}>
-        <h2>Change password</h2>
-        <PasswordField value={oldPassword} onChange={setOldPassword} placeholder="Current password" required />
-        <PasswordField value={newPassword} onChange={setNewPassword} placeholder="New password" required autoComplete="new-password" />
-        <PasswordField value={confirmPassword} onChange={setConfirmPassword} placeholder="Confirm new password" required autoComplete="new-password" />
-        <button className="btn blue" disabled={saving}>
-          Update password
-        </button>
-      </form>
+        <form className="card form form-compact" onSubmit={onChangePassword}>
+          <h2>Change password</h2>
+          <PasswordField value={oldPassword} onChange={setOldPassword} placeholder="Current password" required />
+          <PasswordField
+            value={newPassword}
+            onChange={setNewPassword}
+            placeholder="New password"
+            required
+            autoComplete="new-password"
+          />
+          <PasswordField
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            placeholder="Confirm new password"
+            required
+            autoComplete="new-password"
+          />
+          <div className="actions">
+            <button className="btn blue" disabled={saving}>
+              Update password
+            </button>
+          </div>
+        </form>
+      </div>
+
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="on">{notice}</p> : null}
     </div>
