@@ -399,34 +399,71 @@ export async function markContacted(tenantId: number, userId: number, roles: Rol
   return getLead(tenantId, userId, roles, id);
 }
 
+/** Drop beat seats that no longer match the lead’s assignee (avoids route vs owner conflict). */
+async function syncLeadOutOfConflictingBeats(tenantId: number, leadId: number, assigneeId: number | null) {
+  const members = await prisma.beatMember.findMany({
+    where: { leadId, beat: { tenantId } },
+    include: { beat: { select: { id: true, assigneeId: true, name: true } } },
+  });
+  const toRemove = members.filter((row) => assigneeId == null || row.beat.assigneeId !== assigneeId);
+  if (!toRemove.length) return [] as string[];
+
+  const beatIds = [...new Set(toRemove.map((row) => row.beat.id))];
+  await prisma.beatMember.deleteMany({ where: { id: { in: toRemove.map((row) => row.id) } } });
+  for (const beatId of beatIds) {
+    const rest = await prisma.beatMember.findMany({ where: { beatId }, orderBy: { sequence: "asc" } });
+    await Promise.all(
+      rest.map((item, index) => prisma.beatMember.update({ where: { id: item.id }, data: { sequence: index + 1 } })),
+    );
+  }
+  return [...new Set(toRemove.map((row) => row.beat.name))];
+}
+
 export async function assignLead(
   tenantId: number,
   roles: RoleCode[],
   id: number,
-  assigneeId: number,
+  assigneeId: number | null,
 ) {
   if (!isManager(roles)) {
     throw forbidden();
   }
-  const user = await prisma.user.findFirst({
-    where: { id: assigneeId, tenantId, status: "ACTIVE", roles: { some: { role: { code: "SALES_EXECUTIVE" } } } },
-  });
-  if (!user) {
-    throw badRequest("Salesperson not found.");
+  if (assigneeId != null) {
+    const user = await prisma.user.findFirst({
+      where: { id: assigneeId, tenantId, status: "ACTIVE", roles: { some: { role: { code: "SALES_EXECUTIVE" } } } },
+    });
+    if (!user) {
+      throw badRequest("Salesperson not found.");
+    }
   }
   const lead = await prisma.lead.findFirst({ where: { id, tenantId } });
   if (!lead) {
     throw notFound("Lead not found.");
   }
+
+  const removedFrom = await syncLeadOutOfConflictingBeats(tenantId, id, assigneeId);
+
   const updated = await prisma.lead.update({
     where: { id },
-    data: { assigneeId, status: lead.status === "NEW" ? "ASSIGNED" : lead.status },
+    data: {
+      assigneeId,
+      status: assigneeId == null ? lead.status : lead.status === "NEW" ? "ASSIGNED" : lead.status,
+    },
     include: leadInclude,
   });
-  if (lead.assigneeId !== assigneeId) {
+  if (assigneeId != null && lead.assigneeId !== assigneeId) {
     notifyLeadAssigned(assigneeId, { id: updated.id, name: updated.name });
   }
-  return publicLead(updated);
+
+  const leadOut = publicLead(updated);
+  if (!removedFrom.length) return leadOut;
+  return {
+    ...leadOut,
+    beatNotice:
+      assigneeId == null
+        ? `Removed from beat${removedFrom.length > 1 ? "s" : ""}: ${removedFrom.join(", ")}.`
+        : `Removed from other beat${removedFrom.length > 1 ? "s" : ""} so this lead matches the new executive: ${removedFrom.join(", ")}.`,
+  };
 }
 
 export async function decideLead(

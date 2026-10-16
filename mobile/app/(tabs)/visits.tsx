@@ -104,7 +104,11 @@ export default function VisitsScreen() {
       header={
         <ScreenHeader
           title="Visits"
-          subtitle={tab === "today" ? "Today’s beat · check in, then take a shop photo" : "Filter completed visits by start and end date"}
+          subtitle={
+            tab === "today"
+              ? "Today’s beat target · every lead on the beat · check in one by one"
+              : "Filter completed visits by start and end date"
+          }
         />
       }
     >

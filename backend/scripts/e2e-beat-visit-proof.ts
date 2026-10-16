@@ -260,12 +260,6 @@ async function main() {
   });
   console.log("visited", today2.visitedOnBeat, "missed", today2.missedOnBeat, "size", today2.beatSize);
 
-  // cleanup: deactivate beat so we don't leave junk schedules forever
-  step("cleanup deactivate beat");
-  await req("PATCH", `/beats/${beat.id}`, {
-    token: mgr.accessToken,
-    body: { active: false },
-  });
   try {
     fs.unlinkSync(jpg);
   } catch {

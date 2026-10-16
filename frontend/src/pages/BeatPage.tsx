@@ -18,7 +18,6 @@ type Beat = {
   territory?: string | null;
   assigneeId: number;
   assigneeName: string | null;
-  active: boolean;
   notes: string | null;
   size: number;
   members: Member[];
@@ -70,7 +69,7 @@ export function BeatPage() {
 
   const selected = beats.find((b) => b.id === selectedBeatId) ?? null;
   const personBeats = useMemo(
-    () => beats.filter((b) => b.assigneeId === userId && b.active),
+    () => beats.filter((b) => b.assigneeId === userId),
     [beats, userId],
   );
 
@@ -231,25 +230,6 @@ export function BeatPage() {
     }
   }
 
-  async function archiveBeat() {
-    if (!accessToken || !selected) return;
-    if (!window.confirm(`Archive “${selected.name}”? It will leave the schedule options.`)) return;
-    setBusy(true);
-    try {
-      await api(`/beats/${selected.id}`, {
-        method: "PATCH",
-        token: accessToken,
-        body: JSON.stringify({ active: false }),
-      });
-      setNotice("Beat archived.");
-      await loadBeats();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not archive.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function resizeCycle(length: number) {
     const n = Math.min(90, Math.max(1, Math.floor(length) || 1));
     setCycleLength(n);
@@ -344,7 +324,7 @@ export function BeatPage() {
                 <div>
                   <strong>{person.name}</strong>
                   <div className="muted">
-                    {beats.filter((b) => b.assigneeId === person.userId && b.active).length} active beats
+                    {beats.filter((b) => b.assigneeId === person.userId).length} beats
                   </div>
                 </div>
               </button>
@@ -387,7 +367,7 @@ export function BeatPage() {
                   >
                     <div>
                       <strong>
-                        {b.name} {!b.active ? "(archived)" : ""}
+                        {b.name}
                       </strong>
                       <div className="muted">
                         {b.size} stops · {b.territory || "No area"} · {b.assigneeName}
@@ -406,11 +386,6 @@ export function BeatPage() {
                   <h2 style={{ margin: 0, flex: 1 }}>
                     {selected.name} · {selected.size} stops
                   </h2>
-                  {selected.active ? (
-                    <button className="btn red" type="button" disabled={busy} onClick={archiveBeat}>
-                      Archive
-                    </button>
-                  ) : null}
                 </div>
                 <div className="list">
                   {selected.members.map((stop, index) => (
@@ -512,7 +487,7 @@ export function BeatPage() {
               <p className="muted">Today is before the cycle start date — no beat until start.</p>
             )}
             {!personBeats.length ? (
-              <p className="error">Create at least one active beat for this salesperson first.</p>
+              <p className="error">Create at least one beat for this salesperson first.</p>
             ) : (
               <div className="list">
                 {Array.from({ length: cycleLength }, (_, dayIndex) => (

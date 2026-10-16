@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
@@ -99,16 +99,18 @@ export default function LeadDetailScreen() {
     }
   }
 
-  async function assignTo(userId: number) {
+  async function assignTo(userId: number | null) {
     if (!accessToken || !id) return;
+    if (userId === lead?.assigneeId) return;
     setAssigning(true);
     try {
-      await api(`/leads/${id}/assign`, {
+      const data = await api<{ beatNotice?: string }>(`/leads/${id}/assign`, {
         method: "POST",
         token: accessToken,
         body: JSON.stringify({ userId }),
       });
       await load();
+      if (data.beatNotice) Alert.alert("Beat updated", data.beatNotice);
     } catch (err) {
       Alert.alert("Could not assign", err instanceof Error ? err.message : "Try again.");
     } finally {
@@ -333,6 +335,14 @@ export default function LeadDetailScreen() {
         />
       ) : null}
 
+      {office && lead.approvalStatus === "APPROVED" && lead.status !== "LOST" ? (
+        <Button
+          title="Add to a beat (multi-lead target)"
+          tone="outline"
+          onPress={() => router.push("/beats" as Href)}
+        />
+      ) : null}
+
       {office ? (
         <Card>
           <Text style={styles.section}>Lead details</Text>
@@ -421,13 +431,13 @@ export default function LeadDetailScreen() {
           <Text style={styles.section}>Assigned executive</Text>
           <Text style={typo.muted}>
             {lead.assigneeName
-              ? `${lead.assigneeName} sees this lead on the phone. Pick another person to move it.`
+              ? `${lead.assigneeName} sees this lead on the phone. Moving or unassigning also removes it from beats that no longer match.`
               : "Nobody yet. Pick an executive — only that person will see this lead."}
           </Text>
           {assigning ? (
             <ActivityIndicator color={colors.blue} />
           ) : people.length ? (
-            <ExecPicker people={people} value={lead.assigneeId} onChange={assignTo} />
+            <ExecPicker people={people} value={lead.assigneeId} onChange={assignTo} allowUnassign={Boolean(lead.assigneeId)} />
           ) : (
             <Text style={typo.muted}>Add a sales executive on Team first.</Text>
           )}

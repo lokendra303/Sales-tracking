@@ -89,6 +89,13 @@ export default function MoreScreen() {
         ) : null}
       </Card>
       {office ? <Button title="Edit profile" tone="outline" onPress={() => router.push("/profile/edit" as Href)} /> : null}
+      {isManager(roles) ? (
+        <Button
+          title="Beats · assign many leads"
+          tone="outline"
+          onPress={() => router.push("/beats" as Href)}
+        />
+      ) : null}
       {!isAdmin(roles) ? <Button title="Open reminders" onPress={() => router.push("/notifications")} /> : null}
       {background === false ? <Button title="Allow running in background" onPress={allowBackground} /> : null}
       {offline.pending || !offline.online ? (

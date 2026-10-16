@@ -186,6 +186,28 @@ export type BeatToday = {
   message?: string | null;
 };
 
+/** Permanent beat (route group) — same as desk portal. */
+export type BeatMember = {
+  id: number;
+  sequence: number;
+  leadId: number | null;
+  customerId: number | null;
+  name: string;
+  phone: string | null;
+  city: string | null;
+};
+
+export type PermanentBeat = {
+  id: number;
+  name: string;
+  territory?: string | null;
+  assigneeId: number;
+  assigneeName: string | null;
+  notes: string | null;
+  size: number;
+  members: BeatMember[];
+};
+
 export type BeatPlan = {
   date: string;
   userId: number;

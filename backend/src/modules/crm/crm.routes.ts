@@ -207,7 +207,12 @@ crmRouter.post(
   "/leads/:id/assign",
   requireRole("MANAGER"),
   asyncHandler(async (req, res) => {
-    const body = z.object({ userId: z.number().int().positive() }).parse(req.body);
+    const body = z
+      .object({
+        /** Executive id, or null to unassign (also removes the lead from beats). */
+        userId: z.number().int().positive().nullable(),
+      })
+      .parse(req.body);
     const data = await crm.assignLead(req.auth!.tenantId, req.auth!.roles, Number(req.params.id), body.userId);
     res.json({ success: true, data });
   }),

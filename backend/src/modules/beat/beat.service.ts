@@ -270,7 +270,6 @@ function publicBeat(row: {
   name: string;
   territory?: string | null;
   assigneeId: number;
-  active: boolean;
   notes: string | null;
   assignee?: { name: string } | null;
   members?: { id: number; sequence: number; leadId: number | null; customerId: number | null; lead: { name: string; phone: string; city: string | null } | null; customer: { name: string; phone: string; city: string | null } | null }[];
@@ -282,7 +281,6 @@ function publicBeat(row: {
     territory: row.territory ?? null,
     assigneeId: row.assigneeId,
     assigneeName: row.assignee?.name ?? null,
-    active: row.active,
     notes: row.notes,
     size: row._count?.members ?? row.members?.length ?? 0,
     members: (row.members ?? []).map((item) => {
@@ -301,6 +299,9 @@ function publicBeat(row: {
 }
 
 export async function listBeats(tenantId: number, assigneeId?: number) {
+  // Older builds used `active: false` as “archive”. Bring those back — archive is removed.
+  await prisma.beat.updateMany({ where: { tenantId, active: false }, data: { active: true } });
+
   const rows = await prisma.beat.findMany({
     where: {
       tenantId,
@@ -311,7 +312,7 @@ export async function listBeats(tenantId: number, assigneeId?: number) {
       members: { include: memberInclude, orderBy: { sequence: "asc" } },
       _count: { select: { members: true } },
     },
-    orderBy: [{ active: "desc" }, { name: "asc" }],
+    orderBy: { name: "asc" },
   });
   return rows.map(publicBeat);
 }
@@ -351,7 +352,6 @@ export async function updateBeat(input: {
   id: number;
   name?: string;
   assigneeId?: number;
-  active?: boolean;
   territory?: string | null;
   notes?: string | null;
 }) {
@@ -359,14 +359,16 @@ export async function updateBeat(input: {
   const existing = await prisma.beat.findFirst({ where: { id: input.id, tenantId: input.tenantId } });
   if (!existing) throw notFound("Beat not found.");
   if (input.assigneeId) await requireSalesUser(input.tenantId, input.assigneeId);
+
+  const assigneeChanging = input.assigneeId != null && input.assigneeId !== existing.assigneeId;
   const beat = await prisma.beat.update({
     where: { id: existing.id },
     data: {
       ...(input.name != null ? { name: input.name.trim() } : {}),
       ...(input.assigneeId != null ? { assigneeId: input.assigneeId } : {}),
-      ...(input.active != null ? { active: input.active } : {}),
       ...(input.territory !== undefined ? { territory: input.territory?.trim() || null } : {}),
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+      active: true,
     },
     include: {
       assignee: { select: { name: true } },
@@ -374,6 +376,37 @@ export async function updateBeat(input: {
       _count: { select: { members: true } },
     },
   });
+
+  // Beat owner changed → member leads must belong to the new executive, and leave other people's beats.
+  if (assigneeChanging) {
+    const leadIds = beat.members.map((m) => m.leadId).filter((id): id is number => id != null);
+    for (const leadId of leadIds) {
+      const otherSeats = await prisma.beatMember.findMany({
+        where: { leadId, beatId: { not: beat.id }, beat: { tenantId: input.tenantId } },
+        include: { beat: { select: { id: true, assigneeId: true } } },
+      });
+      const drop = otherSeats.filter((row) => row.beat.assigneeId !== beat.assigneeId);
+      if (drop.length) {
+        const beatIds = [...new Set(drop.map((row) => row.beat.id))];
+        await prisma.beatMember.deleteMany({ where: { id: { in: drop.map((row) => row.id) } } });
+        for (const beatId of beatIds) {
+          const rest = await prisma.beatMember.findMany({ where: { beatId }, orderBy: { sequence: "asc" } });
+          await Promise.all(
+            rest.map((item, index) => prisma.beatMember.update({ where: { id: item.id }, data: { sequence: index + 1 } })),
+          );
+        }
+      }
+      await prisma.lead.updateMany({
+        where: { id: leadId, tenantId: input.tenantId },
+        data: { assigneeId: beat.assigneeId },
+      });
+      notifyLeadAssigned(beat.assigneeId, {
+        id: leadId,
+        name: beat.members.find((m) => m.leadId === leadId)?.lead?.name ?? "Lead",
+      });
+    }
+  }
+
   return publicBeat(beat);
 }
 
@@ -492,7 +525,7 @@ export async function getSchedule(tenantId: number, userId: number, forDate = is
   const startIso = calendarIso(plan.startDate);
   const rows = await prisma.beatSchedule.findMany({
     where: { tenantId, userId },
-    include: { beat: { select: { id: true, name: true, active: true } } },
+    include: { beat: { select: { id: true, name: true } } },
   });
   const days: Record<number, { beatId: number; beatName: string } | null> = {};
   for (let d = 0; d < plan.cycleLength; d++) days[d] = null;
@@ -561,9 +594,12 @@ export async function putSchedule(input: {
       continue;
     }
     const beat = await prisma.beat.findFirst({
-      where: { id: beatId, tenantId: input.tenantId, assigneeId: user.id, active: true },
+      where: { id: beatId, tenantId: input.tenantId, assigneeId: user.id },
     });
     if (!beat) throw badRequest(`Beat ${beatId} is not assigned to this salesperson.`);
+    if (!beat.active) {
+      await prisma.beat.update({ where: { id: beat.id }, data: { active: true } });
+    }
     await prisma.beatSchedule.upsert({
       where: { tenantId_userId_dayIndex: { tenantId: input.tenantId, userId: user.id, dayIndex } },
       create: { tenantId: input.tenantId, userId: user.id, dayIndex, beatId: beat.id },
@@ -591,8 +627,11 @@ export async function ensureScheduledDayStops(tenantId: number, userId: number, 
       },
     },
   });
-  if (!slot?.beat?.active) {
+  if (!slot?.beat) {
     return { beat: null as null, stops: [] as Awaited<ReturnType<typeof stopsForDay>>, planned: false };
+  }
+  if (!slot.beat.active) {
+    await prisma.beat.update({ where: { id: slot.beat.id }, data: { active: true } });
   }
 
   const existing = await stopsForDay(tenantId, userId, date);

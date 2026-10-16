@@ -186,6 +186,7 @@ export function ManagerHome({
       <SectionTitle title="Quick actions" />
       <View style={styles.actions}>
         <ActionTile icon="navigate-outline" label="Live team" tone="green" onPress={() => router.push("/team")} />
+        <ActionTile icon="map-outline" label="Beats" tone="green" onPress={() => router.push("/beats")} />
         <ActionTile icon="camera-outline" label="Visit proof" onPress={() => router.push("/visits")} />
         <ActionTile icon="briefcase-outline" label="Leads" tone="amber" onPress={() => router.push("/leads")} />
         <ActionTile icon="bar-chart-outline" label="Reports" tone="slate" onPress={() => router.push("/reports")} />

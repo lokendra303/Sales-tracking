@@ -140,7 +140,6 @@ beatRouter.patch(
       .object({
         name: z.string().min(2).max(120).optional(),
         assigneeId: z.number().int().positive().optional(),
-        active: z.boolean().optional(),
         territory: z.string().max(160).nullable().optional(),
         notes: z.string().max(2000).nullable().optional(),
       })

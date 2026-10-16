@@ -66,14 +66,17 @@ export function ExecPicker({
   people,
   value,
   onChange,
+  allowUnassign = false,
 }: {
   people: ExecPerson[];
   value: number | null;
-  onChange: (next: number) => void;
+  onChange: (next: number | null) => void;
+  allowUnassign?: boolean;
 }) {
-  if (!people.length) return null;
+  if (!people.length && !allowUnassign) return null;
   return (
     <View style={styles.wrap}>
+      {allowUnassign ? <Chip label="Unassign" on={value == null} onPress={() => onChange(null)} /> : null}
       {people.map((person) => (
         <Chip key={person.id} label={person.name} on={value === person.id} onPress={() => onChange(person.id)} />
       ))}

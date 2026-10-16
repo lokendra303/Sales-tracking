@@ -161,15 +161,17 @@ export function LeadsPage() {
     }
   }
 
-  async function assign(leadId: number, userId: number) {
+  async function assign(leadId: number, userId: number | null) {
     if (!accessToken) return;
     setNotice("");
+    setError("");
     try {
-      await api(`/leads/${leadId}/assign`, {
+      const data = await api<{ beatNotice?: string }>(`/leads/${leadId}/assign`, {
         method: "POST",
         token: accessToken,
         body: JSON.stringify({ userId }),
       });
+      if (data.beatNotice) setNotice(data.beatNotice);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not assign.");
@@ -336,12 +338,19 @@ export function LeadsPage() {
                 <select
                   value={lead.assigneeId ?? ""}
                   onChange={(event) => {
-                    const userId = Number(event.target.value);
-                    if (userId) assign(lead.id, userId);
+                    const raw = event.target.value;
+                    if (raw === "") {
+                      if (lead.assigneeId) assign(lead.id, null);
+                      return;
+                    }
+                    const userId = Number(raw);
+                    if (userId && userId !== lead.assigneeId) assign(lead.id, userId);
                   }}
                   aria-label={`Assign ${lead.name}`}
                 >
-                  <option value="">{lead.assigneeId ? "Change executive" : "Assign executive"}</option>
+                  <option value="">
+                    {lead.assigneeId ? "Unassign (also removes from their beats)" : "Assign executive"}
+                  </option>
                   {people.map((person) => (
                     <option key={person.id} value={person.id}>
                       {person.name}
