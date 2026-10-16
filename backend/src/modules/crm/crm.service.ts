@@ -60,11 +60,13 @@ export async function listLeads(input: {
           ? { status: { in: ["NEW", "ASSIGNED"] }, approvalStatus: "APPROVED" }
           : input.filter === "follow-up"
             ? { status: { in: ["CONTACTED", "FOLLOW_UP"] }, approvalStatus: "APPROVED" }
-            : input.filter === "won"
-              ? { status: "WON" }
-              : input.q
-                ? {}
-                : { status: { not: "LOST" }, approvalStatus: { not: "REJECTED" } },
+            : input.filter === "interested"
+              ? { status: { in: ["INTERESTED", "NEGOTIATION"] }, approvalStatus: "APPROVED" }
+              : input.filter === "won"
+                ? { status: "WON" }
+                : input.q
+                  ? {}
+                  : { status: { not: "LOST" }, approvalStatus: { not: "REJECTED" } },
     ],
   };
 
@@ -131,6 +133,7 @@ export async function createLead(input: {
   phone: string;
   contactPerson?: string;
   businessType?: string;
+  productInterest?: string;
   address?: string;
   city?: string;
   latitude?: number;
@@ -210,6 +213,7 @@ export async function createLead(input: {
       phone,
       contactPerson: input.contactPerson,
       businessType: input.businessType,
+      productInterest: input.productInterest?.trim() || null,
       address: input.address,
       city: input.city,
       latitude,
@@ -344,6 +348,7 @@ export async function updateLead(
     phone?: string;
     contactPerson?: string;
     businessType?: string;
+    productInterest?: string | null;
     address?: string;
     city?: string;
     latitude?: number | null;

@@ -259,6 +259,7 @@ const memberInclude = { lead: true, customer: true };
 function publicBeat(row: {
   id: number;
   name: string;
+  territory?: string | null;
   assigneeId: number;
   active: boolean;
   notes: string | null;
@@ -269,6 +270,7 @@ function publicBeat(row: {
   return {
     id: row.id,
     name: row.name,
+    territory: row.territory ?? null,
     assigneeId: row.assigneeId,
     assigneeName: row.assignee?.name ?? null,
     active: row.active,
@@ -310,6 +312,7 @@ export async function createBeat(input: {
   roles: RoleCode[];
   name: string;
   assigneeId: number;
+  territory?: string;
   notes?: string;
 }) {
   if (!isManager(input.roles)) throw forbidden("Only a manager can create a beat.");
@@ -320,6 +323,7 @@ export async function createBeat(input: {
     data: {
       tenantId: input.tenantId,
       name,
+      territory: input.territory?.trim() || null,
       assigneeId: user.id,
       notes: input.notes?.trim() || null,
     },
@@ -339,6 +343,7 @@ export async function updateBeat(input: {
   name?: string;
   assigneeId?: number;
   active?: boolean;
+  territory?: string | null;
   notes?: string | null;
 }) {
   if (!isManager(input.roles)) throw forbidden("Only a manager can edit a beat.");
@@ -351,6 +356,7 @@ export async function updateBeat(input: {
       ...(input.name != null ? { name: input.name.trim() } : {}),
       ...(input.assigneeId != null ? { assigneeId: input.assigneeId } : {}),
       ...(input.active != null ? { active: input.active } : {}),
+      ...(input.territory !== undefined ? { territory: input.territory?.trim() || null } : {}),
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
     },
     include: {
@@ -610,7 +616,12 @@ export async function ensureScheduledDayStops(tenantId: number, userId: number, 
 
   const stops = await stopsForDay(tenantId, userId, date);
   return {
-    beat: { id: slot.beat.id, name: slot.beat.name, size: slot.beat.members.length },
+    beat: {
+      id: slot.beat.id,
+      name: slot.beat.name,
+      territory: slot.beat.territory ?? null,
+      size: slot.beat.members.length,
+    },
     stops,
     planned: stops.length > 0,
   };
@@ -640,13 +651,18 @@ export async function teamCoverageToday(tenantId: number) {
         checkedInAt: { gte: start, lte: end },
       },
     });
+    const planned = ensured.stops.length;
     rows.push({
       userId: person.id,
       name: person.name,
       beatId: ensured.beat?.id ?? null,
       beatName: ensured.beat?.name ?? null,
-      stops: ensured.stops.length,
+      territory: ensured.beat?.territory ?? null,
+      stops: planned,
+      planned,
       completed: done,
+      visited: done,
+      missed: Math.max(0, planned - done),
     });
   }
   return { date, people: rows };

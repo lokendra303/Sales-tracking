@@ -31,6 +31,7 @@ export function publicLead(lead: {
   phone: string;
   contactPerson: string | null;
   businessType: string | null;
+  productInterest?: string | null;
   address: string | null;
   city: string | null;
   latitude?: unknown;
@@ -62,6 +63,7 @@ export function publicLead(lead: {
     phone: lead.phone,
     contactPerson: lead.contactPerson,
     businessType: lead.businessType,
+    productInterest: lead.productInterest ?? null,
     address: lead.address,
     city: lead.city,
     latitude: lead.latitude != null ? Number(lead.latitude) : null,

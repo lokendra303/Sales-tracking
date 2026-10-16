@@ -330,12 +330,15 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
     };
   });
 
+  const beatSize = scheduled.beat?.size ?? rows.length;
   return {
     radiusMeters: FINISH_RADIUS_METERS,
     beatId: scheduled.beat?.id ?? null,
     beatName: scheduled.beat?.name ?? null,
-    beatSize: scheduled.beat?.size ?? rows.length,
+    territory: scheduled.beat?.territory ?? null,
+    beatSize,
     visitedOnBeat,
+    missedOnBeat: Math.max(0, beatSize - visitedOnBeat),
     completedToday: done,
     activeVisit: active ? publicVisit(active) : null,
     stops: rows,

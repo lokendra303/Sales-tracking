@@ -218,6 +218,8 @@ enum LeadStatus {
   ASSIGNED
   CONTACTED
   FOLLOW_UP
+  INTERESTED
+  NEGOTIATION
   WON
   LOST
 }
@@ -253,6 +255,7 @@ model Lead {
   phone         String
   contactPerson String?
   businessType  String?
+  productInterest String?    @db.VarChar(200)
   address       String?
   city          String?
   latitude      Decimal?     @db.Decimal(10, 7)
@@ -360,6 +363,7 @@ model Beat {
   id         Int      @id @default(autoincrement())
   tenantId   Int
   name       String   @db.VarChar(120)
+  territory  String?  @db.VarChar(160)
   assigneeId Int
   active     Boolean  @default(true)
   notes      String?  @db.Text
