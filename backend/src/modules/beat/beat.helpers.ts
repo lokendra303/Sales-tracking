@@ -19,6 +19,23 @@ export function isoDay(value: Date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Calendar YYYY-MM-DD for Prisma `@db.Date` fields.
+ * Prisma returns those as UTC midnight — local getters can shift the day.
+ */
+export function calendarIso(value: Date | string) {
+  if (typeof value === "string") return value.slice(0, 10);
+  return value.toISOString().slice(0, 10);
+}
+
+/** Store a calendar day in a Prisma `@db.Date` column without TZ drift. */
+export function calendarToDate(iso: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    throw new Error("Use YYYY-MM-DD for calendar dates.");
+  }
+  return new Date(`${iso}T00:00:00.000Z`);
+}
+
 export function plannedAtFor(date: string, sequence: number) {
   const { start } = parseDay(date);
   const planned = new Date(start);

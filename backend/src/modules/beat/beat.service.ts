@@ -3,7 +3,16 @@ import { prisma } from "../../lib/prisma.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { notifyLeadAssigned } from "../../lib/lead-push.js";
 import { isManager } from "../crm/crm.helpers.js";
-import { cycleDayIndex, isoDay, movePlannedTo, parseDay, plannedAtFor, publicStop } from "./beat.helpers.js";
+import {
+  calendarIso,
+  calendarToDate,
+  cycleDayIndex,
+  isoDay,
+  movePlannedTo,
+  parseDay,
+  plannedAtFor,
+  publicStop,
+} from "./beat.helpers.js";
 
 const stopInclude = { lead: true, customer: true };
 
@@ -476,11 +485,11 @@ export async function getSchedule(tenantId: number, userId: number, forDate = is
         tenantId,
         userId,
         cycleLength: 7,
-        startDate: parseDay(forDate).start,
+        startDate: calendarToDate(forDate),
       },
     });
   }
-  const startIso = isoDay(plan.startDate);
+  const startIso = calendarIso(plan.startDate);
   const rows = await prisma.beatSchedule.findMany({
     where: { tenantId, userId },
     include: { beat: { select: { id: true, name: true, active: true } } },
@@ -522,7 +531,8 @@ export async function putSchedule(input: {
   if (!Number.isInteger(cycleLength) || cycleLength < 1 || cycleLength > 90) {
     throw badRequest("Cycle length must be between 1 and 90 days.");
   }
-  const startDate = input.startDate ? parseDay(input.startDate).start : parseDay().start;
+  const startIso = input.startDate && /^\d{4}-\d{2}-\d{2}$/.test(input.startDate) ? input.startDate : isoDay();
+  const startDate = calendarToDate(startIso);
 
   await prisma.beatPlan.upsert({
     where: { tenantId_userId: { tenantId: input.tenantId, userId: user.id } },
@@ -569,7 +579,7 @@ export async function ensureScheduledDayStops(tenantId: number, userId: number, 
   if (!plan) {
     return { beat: null as null, stops: [] as Awaited<ReturnType<typeof stopsForDay>>, planned: false };
   }
-  const dayIndex = cycleDayIndex(isoDay(plan.startDate), plan.cycleLength, date);
+  const dayIndex = cycleDayIndex(calendarIso(plan.startDate), plan.cycleLength, date);
   if (dayIndex == null) {
     return { beat: null as null, stops: [] as Awaited<ReturnType<typeof stopsForDay>>, planned: false };
   }
