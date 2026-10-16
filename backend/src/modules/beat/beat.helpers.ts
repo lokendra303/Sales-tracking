@@ -38,6 +38,21 @@ export function asNumber(value: unknown) {
   return value == null ? null : Number(value);
 }
 
+/** Days from cycle startDate (inclusive day 0) to target date. */
+export function daysBetween(startIso: string, targetIso: string) {
+  const a = parseDay(startIso).start.getTime();
+  const b = parseDay(targetIso).start.getTime();
+  return Math.floor((b - a) / 86_400_000);
+}
+
+/** dayIndex in a rotating cycle of length N (0 .. N-1). Null if before start. */
+export function cycleDayIndex(startIso: string, cycleLength: number, targetIso: string) {
+  if (!Number.isInteger(cycleLength) || cycleLength < 1) return null;
+  const diff = daysBetween(startIso, targetIso);
+  if (diff < 0) return null;
+  return diff % cycleLength;
+}
+
 export function publicStop(row: {
   id: number;
   sequence: number;

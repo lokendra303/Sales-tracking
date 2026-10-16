@@ -303,6 +303,28 @@ export default function VisitScreen() {
         )}
       </Card>
 
+      {/* Manager proof-first: place photo before actions */}
+      {manager && !open ? (
+        <Card>
+          <Text style={styles.cardTitle}>Place proof</Text>
+          {visit.hasPhoto && accessToken ? (
+            <ServerPhoto
+              label="Place photo"
+              photoKey={`visit-${visit.id}-${visit.photoReceivedAt ?? ""}`}
+              load={(fresh) => loadVisitPhoto(visit.id, accessToken, visit.photoReceivedAt, fresh)}
+            />
+          ) : (
+            <Text style={typo.muted}>No live shop photo on this visit.</Text>
+          )}
+          {visit.hasPhoto ? (
+            <Text style={typo.muted}>
+              Received {visit.photoReceivedAt ? when(visit.photoReceivedAt) : "just now"}
+              {visit.photoCapturedAt ? ` · taken ${when(visit.photoCapturedAt)}` : ""}
+            </Text>
+          ) : null}
+        </Card>
+      ) : null}
+
       {visit.phone ? (
         <ActionRow>
           <Button title="Call" flex onPress={() => openCall(visit.phone!)} />
@@ -347,36 +369,38 @@ export default function VisitScreen() {
         />
       </Card>
 
-      <Card>
-        <Text style={styles.cardTitle}>Place photo</Text>
-        {visit.hasPhoto && accessToken ? (
-              <ServerPhoto
-                label="Place photo"
-                photoKey={`visit-${visit.id}-${visit.photoReceivedAt ?? ""}`}
-                load={(fresh) => loadVisitPhoto(visit.id, accessToken, visit.photoReceivedAt, fresh)}
-              />
-            ) : (
-              <Text style={typo.muted}>
-                {manager
-                  ? "No live shop photo yet."
-                  : "Open the live camera at the shop. Gallery upload is blocked."}
-              </Text>
-            )}
-            {visit.hasPhoto ? (
-              <Text style={typo.muted}>
-                Received {visit.photoReceivedAt ? when(visit.photoReceivedAt) : "just now"}
-                {visit.photoCapturedAt ? ` · taken ${when(visit.photoCapturedAt)}` : ""}
-              </Text>
-            ) : null}
-            {open && sales ? (
-              <Button
-                title={visit.hasPhoto ? "Retake with live camera" : "Take live photo"}
-                tone="green"
-                onPress={() => setCapturing(true)}
-                disabled={busy}
-              />
-            ) : null}
+      {!manager || open ? (
+        <Card>
+          <Text style={styles.cardTitle}>Place photo</Text>
+          {visit.hasPhoto && accessToken ? (
+            <ServerPhoto
+              label="Place photo"
+              photoKey={`visit-${visit.id}-${visit.photoReceivedAt ?? ""}`}
+              load={(fresh) => loadVisitPhoto(visit.id, accessToken, visit.photoReceivedAt, fresh)}
+            />
+          ) : (
+            <Text style={typo.muted}>
+              {manager
+                ? "No live shop photo yet."
+                : "Open the live camera at the shop. Gallery upload is blocked."}
+            </Text>
+          )}
+          {visit.hasPhoto ? (
+            <Text style={typo.muted}>
+              Received {visit.photoReceivedAt ? when(visit.photoReceivedAt) : "just now"}
+              {visit.photoCapturedAt ? ` · taken ${when(visit.photoCapturedAt)}` : ""}
+            </Text>
+          ) : null}
+          {open && sales ? (
+            <Button
+              title={visit.hasPhoto ? "Retake with live camera" : "Take live photo"}
+              tone="green"
+              onPress={() => setCapturing(true)}
+              disabled={busy}
+            />
+          ) : null}
         </Card>
+      ) : null}
 
       <Card>
         <Text style={styles.cardTitle}>Demo photos (optional)</Text>

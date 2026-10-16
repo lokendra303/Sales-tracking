@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { router, useFocusEffect, type Href } from "expo-router";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Avatar, Badge, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
+import { Avatar, Badge, Button, Card, EmptyState, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type FieldTeammate } from "@/lib/api";
 import { ageLabel, openCall, openNavigate } from "@/lib/format";
@@ -118,10 +118,21 @@ export default function TeamScreen() {
           </View>
         </Card>
       ) : null}
+      {manager && !admin ? (
+        <Button title="Add sales employee" tone="green" icon="person-add-outline" onPress={() => router.push("/user/new")} />
+      ) : null}
       {loading ? (
         <ActivityIndicator color={colors.blue} />
       ) : users.length === 0 ? (
-        <EmptyState icon="people-outline" text={admin ? "No managers yet" : "No sales executives yet"} />
+        <>
+          <EmptyState
+            icon="people-outline"
+            text={admin ? "No managers yet" : "No sales executives yet. Tap Add sales employee to create one."}
+          />
+          {!admin ? (
+            <Button title="Add sales employee" tone="green" onPress={() => router.push("/user/new")} />
+          ) : null}
+        </>
       ) : (
         users.map((item) => {
           const live = field.find((row) => row.userId === item.id);

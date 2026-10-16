@@ -46,14 +46,24 @@ export function ManagerHome({
 }: Props) {
   const { accessToken } = useAuth();
   const [field, setField] = useState<FieldTeammate[]>([]);
+  const [coverage, setCoverage] = useState<
+    { userId: number; name: string; beatName: string | null; stops: number; completed: number }[]
+  >([]);
 
   useFocusEffect(
     useCallback(() => {
       if (!accessToken) return;
-      const load = () =>
+      const load = () => {
         api<FieldTeammate[]>("/field/team", { token: accessToken })
           .then(setField)
           .catch(() => undefined);
+        api<{ people: { userId: number; name: string; beatName: string | null; stops: number; completed: number }[] }>(
+          "/beat/coverage/today",
+          { token: accessToken },
+        )
+          .then((data) => setCoverage(data.people ?? []))
+          .catch(() => undefined);
+      };
       load();
       const tick = setInterval(load, 30000);
       return () => clearInterval(tick);
@@ -147,12 +157,40 @@ export function ManagerHome({
         />
       </TileGrid>
 
+      {coverage.length ? (
+        <>
+          <SectionTitle title="Today’s beats" />
+          <Card style={styles.list}>
+            {coverage.slice(0, 6).map((row, index) => (
+              <Pressable
+                key={row.userId}
+                onPress={() => router.push({ pathname: "/visits", params: { userId: String(row.userId) } })}
+                style={({ pressed }) => [styles.person, index > 0 && styles.divider, pressed && styles.pressed]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.personName} numberOfLines={1}>
+                    {row.name}
+                  </Text>
+                  <Text style={typo.muted} numberOfLines={1}>
+                    {row.beatName
+                      ? `${row.beatName} · ${row.completed}/${row.stops} visited`
+                      : "No beat scheduled today"}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </Card>
+        </>
+      ) : null}
+
       <SectionTitle title="Quick actions" />
       <View style={styles.actions}>
         <ActionTile icon="navigate-outline" label="Live team" tone="green" onPress={() => router.push("/team")} />
         <ActionTile icon="camera-outline" label="Visit proof" onPress={() => router.push("/visits")} />
         <ActionTile icon="briefcase-outline" label="Leads" tone="amber" onPress={() => router.push("/leads")} />
         <ActionTile icon="bar-chart-outline" label="Reports" tone="slate" onPress={() => router.push("/reports")} />
+        <ActionTile icon="add-circle-outline" label="Add lead" tone="amber" onPress={() => router.push("/lead/new")} />
+        <ActionTile icon="person-add-outline" label="Add employee" tone="green" onPress={() => router.push("/user/new")} />
       </View>
 
       <SectionTitle title="Team right now" action="See all" onAction={() => router.push("/team")} />

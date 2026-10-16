@@ -80,9 +80,11 @@ export function ageLabel(seconds: number | null | undefined) {
 export function statusLabel(status: string) {
   const map: Record<string, string> = {
     NEW: "New",
-    ASSIGNED: "New",
-    CONTACTED: "Follow-up",
+    ASSIGNED: "Assigned",
+    CONTACTED: "Contacted",
     FOLLOW_UP: "Follow-up",
+    INTERESTED: "Interested",
+    NEGOTIATION: "Negotiation",
     WON: "Won",
     LOST: "Lost",
   };

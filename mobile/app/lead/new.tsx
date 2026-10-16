@@ -20,6 +20,7 @@ export default function NewLeadScreen() {
   const [phone, setPhone] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [businessType, setBusinessType] = useState("");
+  const [productInterest, setProductInterest] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
@@ -67,12 +68,21 @@ export default function NewLeadScreen() {
 
   async function save(createAnyway = false) {
     if (!accessToken) return;
+    if (office && !assigneeId) {
+      Alert.alert("Assign an executive", "Pick who will own this lead — same as on the desk portal.");
+      return;
+    }
+    if (!name.trim() || phone.replace(/\D/g, "").length < 10) {
+      Alert.alert("Missing details", "Enter the business name and a 10-digit mobile.");
+      return;
+    }
     setLoading(true);
     const payload = {
       name,
       phone,
       contactPerson: contactPerson || undefined,
       businessType: businessType || undefined,
+      productInterest: productInterest.trim() || undefined,
       address: address || undefined,
       city: city || undefined,
       latitude: pin?.lat,
@@ -129,6 +139,12 @@ export default function NewLeadScreen() {
       <Field label="Phone *" value={phone} onChangeText={setPhone} digitsOnly keyboardType="number-pad" placeholder="10-digit mobile" autoCapitalize="none" />
       <Field label="Contact person" value={contactPerson} onChangeText={setContactPerson} placeholder="Who you meet" />
       <Field label="Business type" value={businessType} onChangeText={setBusinessType} placeholder="Retail, distributor…" />
+      <Field
+        label="Product / service interest"
+        value={productInterest}
+        onChangeText={setProductInterest}
+        placeholder="What they may buy"
+      />
       <Field label="Address" value={address} onChangeText={setAddress} placeholder="Street, area" />
       <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
       <View style={styles.field}>

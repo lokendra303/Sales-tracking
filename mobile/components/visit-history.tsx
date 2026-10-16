@@ -3,6 +3,7 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, V
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { router, useFocusEffect } from "expo-router";
 import { BarChart, MixBar, ProgressRing, dayKey, lastNDays } from "@/components/progress-charts";
+import { ProofThumb } from "@/components/proof-thumb";
 import { Badge, Card, Chip, EmptyState } from "@/components/ui";
 import { api, type Visit } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -79,6 +80,7 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
   const [rows, setRows] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [photoOnly, setPhotoOnly] = useState(Boolean(showPerson));
 
   const range = useMemo(() => {
     if (period === "day") {
@@ -112,7 +114,9 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
 
   const counts = { all: rows.length, completed: 0, missed: 0, in_progress: 0 };
   for (const visit of rows) counts[visitKind(visit)] += 1;
-  const shown = status === "all" ? rows : rows.filter((visit) => visitKind(visit) === status);
+  const shown = (status === "all" ? rows : rows.filter((visit) => visitKind(visit) === status)).filter(
+    (visit) => !photoOnly || visit.hasPhoto,
+  );
   const isToday = isoDay(day) === isoDay();
   const doneRate = counts.all ? Math.round((counts.completed / counts.all) * 100) : 0;
   const trendMap: Record<string, number> = {};
@@ -222,6 +226,13 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
         {statusChips.map((chip) => (
           <Chip key={chip.id} label={`${chip.label} ${counts[chip.id]}`} on={status === chip.id} onPress={() => setStatus(chip.id)} />
         ))}
+        {showPerson ? (
+          <Chip
+            label={`With photo ${rows.filter((v) => v.hasPhoto).length}`}
+            on={photoOnly}
+            onPress={() => setPhotoOnly((on) => !on)}
+          />
+        ) : null}
       </ScrollView>
 
       {!loading && counts.all > 0 ? (
@@ -269,6 +280,14 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
             <Pressable key={visit.id} onPress={() => router.push(`/visit/${visit.id}`)}>
               <Card>
                 <View style={styles.row}>
+                  {accessToken ? (
+                    <ProofThumb
+                      visitId={visit.id}
+                      hasPhoto={Boolean(visit.hasPhoto)}
+                      token={accessToken}
+                      version={visit.photoReceivedAt}
+                    />
+                  ) : null}
                   <View style={{ flex: 1 }}>
                     <Text style={styles.name}>{visit.name}</Text>
                     <Text style={typo.muted}>
@@ -280,7 +299,9 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
                       {visit.checkinDistanceMeters != null ? `Check-in ${visit.checkinDistanceMeters} m from pin` : "Check-in GPS saved"}
                       {visit.finishDistanceMeters != null ? ` · Finish ${visit.finishDistanceMeters} m` : ""}
                     </Text>
-                    <Text style={typo.muted}>{visit.hasPhoto ? "Photo uploaded" : "No photo"}</Text>
+                    <Text style={visit.hasPhoto ? styles.proofOn : typo.muted}>
+                      {visit.hasPhoto ? "Place proof ready · Open" : "No place photo"}
+                    </Text>
                     {visit.saleAmount != null ? <Text style={styles.sale}>Sale {money(visit.saleAmount)}</Text> : null}
                   </View>
                   <Badge label={badge.label} tone={badge.tone} />
@@ -340,5 +361,7 @@ const styles = StyleSheet.create({
   donePickText: { color: "#fff", fontWeight: "800" },
   row: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
   name: { fontWeight: "800", color: colors.text, fontSize: 16 },
+  proofOn: { color: colors.green, fontWeight: "800", fontSize: 13 },
   sale: { color: colors.green, fontWeight: "800" },
+  proofOn: { color: colors.green, fontWeight: "800", fontSize: 13 },
 });

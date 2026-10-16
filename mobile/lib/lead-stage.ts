@@ -60,6 +60,12 @@ export function leadStage(lead: Lead, now = new Date()): LeadStage {
   if (lead.status === "LOST") {
     return { bucket: "done", label: "Closed · not interested", tone: "slate", icon: "remove-circle", rank: 2, at: 0, canVisit: false };
   }
+  if (lead.status === "NEGOTIATION") {
+    return { bucket: "todo", label: "Negotiation · close the deal", tone: "amber", icon: "swap-horizontal", rank: 1, at: 0, canVisit: true };
+  }
+  if (lead.status === "INTERESTED") {
+    return { bucket: "todo", label: "Interested · keep following up", tone: "blue", icon: "flame", rank: 2, at: 0, canVisit: true };
+  }
 
   const visit = lead.lastVisit;
   const visitAt = visit ? new Date(visit.checkedInAt) : null;

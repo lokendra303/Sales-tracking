@@ -2,8 +2,10 @@ import { persistGet, persistSet } from "./persist";
 import { getItem, removeItem, setItem } from "./storage";
 import { Platform } from "react-native";
 
+const LIVE_API = "https://kamaxinventory.sepcune.com/Sales-tracking-api";
+
 function defaultBase() {
-  return process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/$/, "") || "";
+  return process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/$/, "") || LIVE_API;
 }
 
 export const API_BASE = defaultBase();
@@ -46,6 +48,7 @@ export type Lead = {
   phone: string;
   contactPerson: string | null;
   businessType: string | null;
+  productInterest?: string | null;
   address: string | null;
   city: string | null;
   latitude: number | null;
@@ -171,9 +174,16 @@ export type BeatStop = {
 
 export type BeatToday = {
   radiusMeters: number;
+  beatId?: number | null;
+  beatName?: string | null;
+  territory?: string | null;
+  beatSize?: number;
+  visitedOnBeat?: number;
+  missedOnBeat?: number;
   completedToday: number;
   activeVisit: Visit | null;
   stops: BeatStop[];
+  message?: string | null;
 };
 
 export type BeatPlan = {
@@ -501,6 +511,16 @@ function readUpload<T>(status: number, body: string): T {
   }
 }
 
+async function writePhotoCache(name: string, bytes: Uint8Array) {
+  const fs = await import("expo-file-system");
+  const dir = new fs.Directory(fs.Paths.cache, "server-photos");
+  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+  const dest = new fs.File(dir, `${name.replace(/[^0-9a-z-]/gi, "")}.jpg`);
+  if (dest.exists) dest.delete();
+  dest.write(bytes);
+  return dest.uri;
+}
+
 async function downloadPhoto(path: string, name: string, token: string, fresh: boolean) {
   const fs = await import("expo-file-system");
   const dir = new fs.Directory(fs.Paths.cache, "server-photos");
@@ -508,11 +528,26 @@ async function downloadPhoto(path: string, name: string, token: string, fresh: b
   const dest = new fs.File(dir, `${name.replace(/[^0-9a-z-]/gi, "")}.jpg`);
   if (dest.exists && fresh) dest.delete();
   else if (dest.exists && dest.size > 0) return dest.uri;
-  const file = await fs.File.downloadFileAsync(`${API_BASE}${path}`, dest, {
-    headers: { Authorization: `Bearer ${token}` },
-    idempotent: true,
+
+  // Prefer authenticated fetch + write — more reliable than downloadFileAsync on some devices.
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "image/*" },
   });
-  return file.uri;
+  if (!response.ok) {
+    throw new Error(`Photo HTTP ${response.status}`);
+  }
+  const buffer = await response.arrayBuffer();
+  if (!buffer.byteLength) throw new Error("Empty photo");
+  try {
+    return await writePhotoCache(name, new Uint8Array(buffer));
+  } catch {
+    // Fallback for older expo-file-system write shapes
+    const file = await fs.File.downloadFileAsync(`${API_BASE}${path}`, dest, {
+      headers: { Authorization: `Bearer ${token}` },
+      idempotent: true,
+    });
+    return file.uri;
+  }
 }
 
 /** Local file URI for a server photo; the image view itself cannot send the login header reliably. */

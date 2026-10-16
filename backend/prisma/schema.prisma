@@ -39,6 +39,9 @@ model Tenant {
   customers Customer[]
   followUps FollowUp[]
   beatStops         BeatStop[]
+  beats             Beat[]
+  beatSchedules     BeatSchedule[]
+  beatPlans         BeatPlan[]
   visits            Visit[]
   locationSessions  LocationSession[]
   locationLogs      LocationLog[]
@@ -113,6 +116,9 @@ model User {
   assignedCustomers Customer[] @relation("CustomerOwner")
   followUps       FollowUp[]
   beatStops         BeatStop[]
+  assignedBeats     Beat[]            @relation("BeatAssignee")
+  beatSchedules     BeatSchedule[]
+  beatPlans         BeatPlan[]
   visits            Visit[]
   locationSessions  LocationSession[]
   locationLogs      LocationLog[]
@@ -272,10 +278,11 @@ model Lead {
   createdBy User       @relation("LeadCreator", fields: [createdById], references: [id])
   approvedBy User?     @relation("LeadApprover", fields: [approvedById], references: [id])
   customer  Customer?  @relation(fields: [customerId], references: [id])
-  followUps FollowUp[]
-  beatStops BeatStop[]
-  visits    Visit[]
-  sales     Sale[]
+  followUps   FollowUp[]
+  beatStops   BeatStop[]
+  beatMembers BeatMember[]
+  visits      Visit[]
+  sales       Sale[]
 
   @@unique([tenantId, clientRequestId])
   @@index([tenantId, phone])
@@ -303,11 +310,12 @@ model Customer {
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner     User?      @relation("CustomerOwner", fields: [ownerId], references: [id])
-  leads     Lead[]
-  followUps FollowUp[]
-  beatStops BeatStop[]
-  visits    Visit[]
-  sales     Sale[]
+  leads       Lead[]
+  followUps   FollowUp[]
+  beatStops   BeatStop[]
+  beatMembers BeatMember[]
+  visits      Visit[]
+  sales       Sale[]
 
   @@unique([tenantId, phone])
   @@map("customer")
@@ -347,10 +355,81 @@ enum VisitOutcome {
   UNAVAILABLE
 }
 
+/** Permanent named beat (route) assigned to one salesperson. Size = member count. */
+model Beat {
+  id         Int      @id @default(autoincrement())
+  tenantId   Int
+  name       String   @db.VarChar(120)
+  assigneeId Int
+  active     Boolean  @default(true)
+  notes      String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee  User           @relation("BeatAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  members   BeatMember[]
+  schedules BeatSchedule[]
+  dayStops  BeatStop[]
+
+  @@index([tenantId, assigneeId, active])
+  @@map("beat")
+}
+
+model BeatMember {
+  id         Int @id @default(autoincrement())
+  beatId     Int
+  leadId     Int?
+  customerId Int?
+  sequence   Int @default(1)
+
+  beat     Beat      @relation(fields: [beatId], references: [id], onDelete: Cascade)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([beatId, sequence])
+  @@map("beatmember")
+}
+
+/** Per-salesperson rotating plan: cycleLength days from startDate (e.g. 15 / 20 / 30). */
+model BeatPlan {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int
+  userId      Int
+  cycleLength Int      @default(7)
+  startDate   DateTime @db.Date
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@map("beatplan")
+}
+
+/** One beat for dayIndex 0 .. cycleLength-1 in that salesperson's plan. */
+model BeatSchedule {
+  id       Int @id @default(autoincrement())
+  tenantId Int
+  userId   Int
+  dayIndex Int
+  beatId   Int
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  beat   Beat   @relation(fields: [beatId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, dayIndex])
+  @@index([tenantId, userId])
+  @@map("beatschedule")
+}
+
 model BeatStop {
   id         Int       @id @default(autoincrement())
   tenantId   Int
   userId     Int
+  beatId     Int?
   leadId     Int?
   customerId Int?
   sequence   Int       @default(1)
@@ -360,11 +439,13 @@ model BeatStop {
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  beat     Beat?     @relation(fields: [beatId], references: [id], onDelete: SetNull)
   lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   visits   Visit[]
 
   @@index([tenantId, userId, plannedAt])
+  @@index([beatId, plannedAt])
   @@map("beatstop")
 }
 

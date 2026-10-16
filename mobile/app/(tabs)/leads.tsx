@@ -21,13 +21,14 @@ import { api, type Customer, type Lead } from "@/lib/api";
 import { leadIsOpen, money, openCall, openNavigate, openWhatsApp, tempColor } from "@/lib/format";
 import { leadStage, sortByStage, stageColors, type LeadStage, type StageBucket } from "@/lib/lead-stage";
 import { isSales } from "@/lib/roles";
-import { colors, radius } from "@/lib/theme";
+import { colors, radius, shadow } from "@/lib/theme";
 
 const filters = [
   { id: "all", label: "All" },
   { id: "pending", label: "Approval" },
   { id: "new", label: "New" },
   { id: "follow-up", label: "Follow-up" },
+  { id: "interested", label: "Interested" },
   { id: "won", label: "Won" },
 ];
 
@@ -119,15 +120,30 @@ export default function LeadsScreen() {
   }, [rows]);
 
   const searching = q.trim().length > 0;
+  const pendingCount = useMemo(
+    () => leads.filter((lead) => lead.approvalStatus === "PENDING").length,
+    [leads],
+  );
   const visible = useMemo(() => {
-    if (!sales) return rows;
+    if (!sales) {
+      // Manager: portal-style — pending approval first, then newest activity.
+      const list = [...rows];
+      list.sort((a, b) => {
+        const ap = a.lead.approvalStatus === "PENDING" ? 0 : 1;
+        const bp = b.lead.approvalStatus === "PENDING" ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        return (b.lead.createdAt || "").localeCompare(a.lead.createdAt || "");
+      });
+      return list;
+    }
     const list = searching ? rows : rows.filter((row) => row.stage.bucket === tab);
     return [...list].sort((a, b) => sortByStage(a.stage, b.stage));
   }, [rows, sales, searching, tab]);
 
   const visitedToday = rows.filter((row) => row.stage.bucket === "done" && row.stage.rank === 0).length;
   const dayTotal = visitedToday + counts.todo;
-  const showCustomers = !sales || searching || tab === "done";
+  // Managers review leads like the desk; customers stay off this list.
+  const showCustomers = sales && (searching || tab === "done");
 
   function startVisit(row: Row) {
     if (row.lead.lastVisit?.status === "IN_PROGRESS") {
@@ -145,7 +161,11 @@ export default function LeadsScreen() {
       header={
         <ScreenHeader
           title="Leads"
-          subtitle={office ? "Assign and review by executive" : "Your shops and what to do next"}
+          subtitle={
+            office
+              ? "Approve, assign, and review — same workflow as the desk portal"
+              : "Your shops and what to do next"
+          }
           right={
             <Pressable style={styles.add} onPress={() => router.push("/lead/new")} accessibilityLabel="Add lead">
               <Ionicons name="add" size={22} color="#fff" />
@@ -155,6 +175,20 @@ export default function LeadsScreen() {
       }
     >
       <View style={[styles.head, { paddingHorizontal: pagePad }]}>
+        {office && pendingCount > 0 && filter !== "pending" ? (
+          <Pressable
+            style={styles.pendingBanner}
+            onPress={() => {
+              setFilter("pending");
+              setTab("waiting");
+            }}
+          >
+            <Ionicons name="hourglass-outline" size={18} color={colors.amber} />
+            <Text style={styles.pendingText}>
+              {pendingCount} lead{pendingCount === 1 ? "" : "s"} waiting for approval — tap to review
+            </Text>
+          </Pressable>
+        ) : null}
         <SearchBox placeholder="Search name or phone" value={q} onChangeText={setQ} onSubmit={load} />
         {sales ? (
           <>
@@ -224,32 +258,45 @@ export default function LeadsScreen() {
             const temp = tempColor(lead.temperature);
             const tone = stageColors[stage.tone];
             const inProgress = lead.lastVisit?.status === "IN_PROGRESS";
+            const initial = (lead.name.trim()[0] || "?").toUpperCase();
             return (
-              <Card key={`lead-${lead.id}`} style={{ ...styles.leadCard, borderLeftColor: tone.fg }}>
+              <Card key={`lead-${lead.id}`} style={{ ...styles.leadCard, borderLeftColor: tone.fg, ...shadow }}>
                 <Pressable onPress={() => router.push(`/lead/${lead.id}`)} style={styles.leadBody}>
-                  <View style={[styles.stage, { backgroundColor: tone.bg }]}>
-                    <Ionicons name={stage.icon} size={16} color={tone.fg} />
-                    <Text style={[styles.stageText, { color: tone.fg }]} numberOfLines={1}>
-                      {stage.label}
-                    </Text>
-                  </View>
-                  <View style={styles.row}>
-                    <Text style={styles.name} numberOfLines={2}>
-                      {lead.name}
-                    </Text>
-                    <Badge label={temp.label} tone={lead.temperature === "HOT" ? "red" : lead.temperature === "COLD" ? "blue" : "amber"} />
+                  <View style={styles.leadTop}>
+                    <View style={[styles.avatar, { backgroundColor: tone.bg }]}>
+                      <Text style={[styles.avatarText, { color: tone.fg }]}>{initial}</Text>
+                    </View>
+                    <View style={{ flex: 1, gap: 6 }}>
+                      <View style={[styles.stage, { backgroundColor: tone.bg }]}>
+                        <Ionicons name={stage.icon} size={14} color={tone.fg} />
+                        <Text style={[styles.stageText, { color: tone.fg }]} numberOfLines={1}>
+                          {stage.label}
+                        </Text>
+                      </View>
+                      <View style={styles.row}>
+                        <Text style={styles.name} numberOfLines={2}>
+                          {lead.name}
+                        </Text>
+                        <Badge
+                          label={temp.label}
+                          tone={lead.temperature === "HOT" ? "red" : lead.temperature === "COLD" ? "blue" : "amber"}
+                        />
+                      </View>
+                    </View>
                   </View>
                   <Text style={styles.meta} numberOfLines={2}>
                     {[
+                      lead.productInterest || lead.businessType,
                       lead.potential ? money(lead.potential) : null,
                       lead.city,
                       office && lead.assigneeName ? `→ ${lead.assigneeName}` : null,
                       office && lead.createdByName ? `by ${lead.createdByName}` : null,
-                      lead.latitude != null ? "Map pin" : null,
+                      lead.latitude != null ? "Pinned" : null,
                     ]
                       .filter(Boolean)
                       .join(" · ") || lead.phone}
                   </Text>
+                  <Text style={styles.phoneLine}>{lead.phone}</Text>
                 </Pressable>
                 {sales && stage.canVisit ? (
                   <Button
@@ -295,7 +342,9 @@ export default function LeadsScreen() {
                             body: JSON.stringify({ decision: "APPROVED" }),
                           })
                             .then(load)
-                            .catch(() => undefined);
+                            .catch((err) =>
+                              Alert.alert("Could not approve", err instanceof Error ? err.message : "Try again."),
+                            );
                         }}
                       />
                       <Button
@@ -315,13 +364,18 @@ export default function LeadsScreen() {
                                   body: JSON.stringify({ decision: "REJECTED" }),
                                 })
                                   .then(load)
-                                  .catch(() => undefined);
+                                  .catch((err) =>
+                                    Alert.alert("Could not reject", err instanceof Error ? err.message : "Try again."),
+                                  );
                               },
                             },
                           ])
                         }
                       />
                     </>
+                  ) : null}
+                  {office && lead.approvalStatus !== "PENDING" ? (
+                    <Button title="Open / assign" tone="outline" flex onPress={() => router.push(`/lead/${lead.id}`)} />
                   ) : null}
                 </ActionRow>
               </Card>
@@ -359,7 +413,9 @@ export default function LeadsScreen() {
                       : "No leads assigned to you yet. Add a lead and it appears here right away."
                   : filter === "pending"
                     ? "No leads are waiting for approval."
-                    : "No leads in this view. Assign a shop to an executive, or tap +."
+                    : filter === "new"
+                      ? "No new leads in this filter."
+                      : "No leads in this view. Tap + to add a lead and assign an executive."
               }
             />
           ) : null}
@@ -372,12 +428,34 @@ export default function LeadsScreen() {
 const styles = StyleSheet.create({
   head: { paddingTop: 8, paddingBottom: 12, gap: 12 },
   add: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" },
+  pendingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  pendingText: { flex: 1, color: colors.text, fontWeight: "700", fontSize: 13 },
   filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   name: { fontSize: 17, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
   meta: { color: colors.muted, flexShrink: 1 },
-  leadCard: { borderLeftWidth: 5 },
+  leadCard: { borderLeftWidth: 5, overflow: "hidden" },
   leadBody: { gap: 8 },
+  leadTop: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { fontWeight: "800", fontSize: 18 },
+  phoneLine: { color: colors.ink, fontWeight: "700", fontSize: 13 },
   stage: {
     flexDirection: "row",
     alignItems: "center",
@@ -391,11 +469,12 @@ const styles = StyleSheet.create({
   stageText: { fontWeight: "800", fontSize: 12, flexShrink: 1 },
   progress: {
     backgroundColor: colors.card,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.line,
-    padding: 12,
+    padding: 14,
     gap: 8,
+    ...shadow,
   },
   progressTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   progressTitle: { color: colors.text, fontWeight: "800", fontSize: 14 },

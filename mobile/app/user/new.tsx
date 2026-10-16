@@ -27,23 +27,36 @@ export default function NewUserScreen() {
       Alert.alert("Managers register themselves", "Approve new companies under Registrations on the desk.");
       return;
     }
+    if (!name.trim() || !employeeId.trim() || phone.replace(/\D/g, "").length < 10) {
+      Alert.alert("Missing details", "Enter name, employee ID, and a 10-digit mobile.");
+      return;
+    }
+    if (!email.trim() || !designation.trim() || !city.trim()) {
+      Alert.alert("Missing details", "Email, designation, and city are required.");
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert("Weak password", "Use at least 6 characters for the app password.");
+      return;
+    }
     setLoading(true);
     try {
       await api("/users", {
         method: "POST",
         token: accessToken,
         body: JSON.stringify({
-          name,
+          name: name.trim(),
           phone,
-          email,
-          employeeId,
-          designation,
-          city,
-          address: address || undefined,
-          joiningDate: joiningDate || undefined,
+          email: email.trim(),
+          employeeId: employeeId.trim(),
+          designation: designation.trim(),
+          city: city.trim(),
+          address: address.trim() || undefined,
+          joiningDate: joiningDate.trim() || undefined,
           password,
         }),
       });
+      Alert.alert("Employee saved", `${name.trim()} can sign in on the phone with mobile + password.`);
       goBack("/team");
     } catch (err) {
       Alert.alert("Could not save", err instanceof Error ? err.message : "Try again.");
@@ -57,7 +70,7 @@ export default function NewUserScreen() {
       <Text style={typo.muted}>
         {admin
           ? "System admins approve manager registrations on the desk. They do not add employees here."
-          : "All fields marked * are required. The employee logs in on the phone app only."}
+          : "Add a sales executive. Fields marked * are required. They log in on the phone with mobile + password."}
       </Text>
       {admin ? null : (
         <>

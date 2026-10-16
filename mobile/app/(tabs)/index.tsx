@@ -44,6 +44,7 @@ export default function HomeScreen() {
   const [upcoming, setUpcoming] = useState<FollowUp[]>([]);
   const [teamCount, setTeamCount] = useState(0);
   const [nextStop, setNextStop] = useState<BeatToday["stops"][number] | null>(null);
+  const [beatToday, setBeatToday] = useState<BeatToday | null>(null);
   const [tomorrow, setTomorrow] = useState<BeatPlan | null>(null);
 
   useFocusEffect(
@@ -78,6 +79,7 @@ export default function HomeScreen() {
           .catch(() => undefined);
         api<BeatToday>("/beat/today", { token: accessToken })
           .then((beat) => {
+            setBeatToday(beat);
             if (beat.activeVisit) {
               setNextStop({
                 id: beat.activeVisit.beatStopId,
@@ -171,6 +173,57 @@ export default function HomeScreen() {
         </Card>
       ) : null}
 
+      {isSales(roles) && beatToday ? (
+        <Card style={styles.beatCard}>
+          <View style={styles.beatTop}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.beatKicker}>Today’s beat</Text>
+              <Text style={styles.cardTitle}>{beatToday.beatName || "Today’s beat"}</Text>
+              {beatToday.territory ? <Text style={styles.beatTerritory}>{beatToday.territory}</Text> : null}
+              <Text style={styles.live}>
+                {beatToday.visitedOnBeat ?? beatToday.completedToday}/
+                {beatToday.beatSize ?? beatToday.stops.length} visited
+                {beatToday.missedOnBeat != null ? ` · ${beatToday.missedOnBeat} pending` : ""}
+              </Text>
+            </View>
+            <ProgressRing
+              percent={
+                beatToday.beatSize || beatToday.stops.length
+                  ? Math.round(
+                      ((beatToday.visitedOnBeat ?? beatToday.completedToday) /
+                        (beatToday.beatSize || beatToday.stops.length || 1)) *
+                        100,
+                    )
+                  : 0
+              }
+              size={72}
+              thickness={7}
+              color={colors.green}
+              trackColor={colors.line}
+              label={`${Math.min(
+                100,
+                Math.round(
+                  ((beatToday.visitedOnBeat ?? beatToday.completedToday) /
+                    Math.max(1, beatToday.beatSize || beatToday.stops.length)) *
+                    100,
+                ),
+              )}%`}
+              sublabel="done"
+            />
+          </View>
+          {beatToday.message ? <Text style={typo.muted}>{beatToday.message}</Text> : null}
+          <Button title="Open beat list" tone="outline" onPress={() => router.push("/visits")} />
+          <Button title="Add lead" tone="green" onPress={() => router.push("/lead/new")} />
+        </Card>
+      ) : null}
+      {isSales(roles) && !beatToday ? (
+        <Card>
+          <Text style={styles.cardTitle}>Leads</Text>
+          <Text style={typo.muted}>Add a shop when you find a new lead in the field.</Text>
+          <Button title="Add lead" tone="green" onPress={() => router.push("/lead/new")} />
+        </Card>
+      ) : null}
+
       {isSales(roles) ? (
         <Card>
           <Text style={styles.cardTitle}>Tomorrow</Text>
@@ -180,7 +233,7 @@ export default function HomeScreen() {
               <Text style={typo.muted}>{tomorrow.stops.map((stop) => stop.name).join(" → ")}</Text>
             </>
           ) : (
-            <Text style={typo.muted}>Manager has not planned tomorrow yet.</Text>
+            <Text style={typo.muted}>No beat scheduled for tomorrow yet (set the cycle on the desk).</Text>
           )}
         </Card>
       ) : null}
@@ -334,6 +387,10 @@ const styles = StyleSheet.create({
   live: { color: colors.text, fontWeight: "700", fontSize: 15 },
   warn: { color: "#92400E", fontWeight: "700", lineHeight: 20 },
   target: { fontSize: 22, fontWeight: "800", color: colors.text },
+  beatCard: { gap: 12, borderWidth: 1, borderColor: "#BFDBFE", backgroundColor: "#F8FBFF" },
+  beatTop: { flexDirection: "row", alignItems: "center", gap: 12 },
+  beatKicker: { color: colors.blue, fontWeight: "800", fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase" },
+  beatTerritory: { color: colors.ink, fontWeight: "600", fontSize: 13 },
   progressBlock: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 12 },
   barBg: { height: 8, backgroundColor: "#E5E7EB", borderRadius: 8, overflow: "hidden" },
   barFill: { height: 8, backgroundColor: colors.green },

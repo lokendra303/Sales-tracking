@@ -278,19 +278,10 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
   }
 
   const { start, end } = dayBounds();
-  const [stops, active, done, todayVisits] = await Promise.all([
-    prisma.beatStop.findMany({
-      where: {
-        tenantId,
-        userId,
-        OR: [{ plannedAt: { gte: start, lte: end } }, { plannedAt: null }],
-      },
-      include: {
-        lead: true,
-        customer: true,
-      },
-      orderBy: { sequence: "asc" },
-    }),
+  const { ensureScheduledDayStops } = await import("../beat/beat.service.js");
+  const scheduled = await ensureScheduledDayStops(tenantId, userId);
+
+  const [active, done, todayVisits] = await Promise.all([
     prisma.visit.findFirst({
       where: { tenantId, userId, status: "IN_PROGRESS" },
       include: visitInclude,
@@ -307,43 +298,8 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
   const samePlace = (stop: { leadId: number | null; customerId: number | null }) => (visit: { leadId: number | null; customerId: number | null }) =>
     Boolean((stop.leadId && visit.leadId === stop.leadId) || (stop.customerId && visit.customerId === stop.customerId));
 
-  let items = stops;
-  const planned = items.length > 0;
-  if (!planned) {
-    const leads = await prisma.lead.findMany({
-      where: {
-        tenantId,
-        assigneeId: userId,
-        approvalStatus: "APPROVED",
-        OR: [
-          { visits: { some: { userId, checkedInAt: { gte: start, lte: end } } } },
-          {
-            status: { notIn: ["WON", "LOST"] },
-            OR: [
-              { visits: { none: { userId, status: "COMPLETED", outcome: "SUCCESS", checkedInAt: { lt: start } } } },
-              { followUps: { some: { userId, type: "VISIT", doneAt: null, dueAt: { lte: end } } } },
-            ],
-          },
-        ],
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 30,
-    });
-    items = leads.map((lead, index) => ({
-      id: 0,
-      tenantId,
-      userId,
-      leadId: lead.id,
-      customerId: null,
-      sequence: index + 1,
-      plannedAt: null,
-      createdAt: lead.createdAt,
-      updatedAt: lead.updatedAt,
-      lead,
-      customer: null,
-      visits: [],
-    }));
-  }
+  const items = scheduled.stops;
+  const visitedOnBeat = items.filter((stop) => todayVisits.some(samePlace(stop))).length;
 
   const rows = items.map((stop) => {
     const place = stop.lead ?? stop.customer;
@@ -373,19 +329,19 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
       saleId: latest?.sales?.[0]?.id ?? null,
     };
   });
-  if (!planned) {
-    const finished = (row: (typeof rows)[number]) => (row.visitStatus === "COMPLETED" && row.visitOutcome === "SUCCESS" ? 1 : 0);
-    rows.sort((a, b) => finished(a) - finished(b));
-    rows.forEach((row, index) => {
-      row.sequence = index + 1;
-    });
-  }
 
   return {
     radiusMeters: FINISH_RADIUS_METERS,
+    beatId: scheduled.beat?.id ?? null,
+    beatName: scheduled.beat?.name ?? null,
+    beatSize: scheduled.beat?.size ?? rows.length,
+    visitedOnBeat,
     completedToday: done,
     activeVisit: active ? publicVisit(active) : null,
     stops: rows,
+    message: scheduled.beat
+      ? null
+      : "No beat scheduled for today. Ask your manager to assign a weekly beat.",
   };
 }
 
