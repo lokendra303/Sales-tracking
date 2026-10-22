@@ -4,7 +4,7 @@ import { MapView } from "../components/MapView";
 import { useExecutives } from "../components/ExecFilter";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { mapsUrl as buildMapsUrl } from "../lib/maps";
+import { looksLikeMapsLink, mapsUrl as buildMapsUrl, parseMapsLink } from "../lib/maps";
 import { mobileDigits } from "../lib/phone";
 
 type Lead = {
@@ -161,22 +161,38 @@ export function LeadDetailPage() {
 
   async function findAddress() {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ");
+    const query = [address, city].filter(Boolean).join(", ").trim();
     setError("");
     setNotice("");
     setMatches([]);
     if (query.length < 3) {
-      setError("Type the shop address or city first.");
+      setError("Type the shop address, or paste a Google Maps link.");
+      return;
+    }
+    const local = parseMapsLink(query);
+    if (local) {
+      setPin({ lat: local.lat, lng: local.lng });
+      setMatches([{ lat: local.lat, lng: local.lng, label: local.label, kind: "coordinates" }]);
+      setNotice("Pin set from the map link. Save location to keep it.");
       return;
     }
     try {
       const hits = await api<GeoHit[]>(`/geo?q=${encodeURIComponent(query)}`, { token: accessToken });
       if (!hits.length) {
-        setError("No match for that address. Click the exact shop on the map.");
+        setError(
+          looksLikeMapsLink(query)
+            ? "Could not read that Google Maps link. Open it, copy the full link from the browser bar, or click the shop on the map."
+            : "No match for that address. Click the exact shop on the map.",
+        );
         return;
       }
       setMatches(hits);
       setPin({ lat: hits[0].lat, lng: hits[0].lng });
+      setNotice(
+        hits[0].kind === "coordinates"
+          ? "Pin set from the map link. Save location to keep it."
+          : "Address found — confirm the pin on the map, then save.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not search that address.");
     }
@@ -369,8 +385,12 @@ export function LeadDetailPage() {
         </p>
         <div className="grid-2">
           <label>
-            Address
-            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area, landmark" />
+            Address or Google Maps link
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Street, area — or paste maps.app.goo.gl / Google Maps link"
+            />
           </label>
           <label>
             City
@@ -379,7 +399,7 @@ export function LeadDetailPage() {
         </div>
         <div className="toolbar">
           <button className="btn blue" type="button" onClick={findAddress}>
-            Find address on map
+            Find address / map link
           </button>
           <button className="link" type="button" onClick={useMyLocation}>
             Use my location

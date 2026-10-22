@@ -60,7 +60,7 @@ crmRouter.get(
   "/geo",
   asyncHandler(async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-    if (q.length < 3) throw badRequest("Enter an address to find on the map.");
+    if (q.length < 3) throw badRequest("Enter an address or paste a Google Maps link.");
     const data = await searchPlaces(q);
     res.json({ success: true, data });
   }),

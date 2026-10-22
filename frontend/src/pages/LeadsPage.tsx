@@ -4,7 +4,7 @@ import { ExecFilter, useExecutives, type ExecValue } from "../components/ExecFil
 import { MapView } from "../components/MapView";
 import { api, apiForm } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { mapsUrl } from "../lib/maps";
+import { looksLikeMapsLink, mapsUrl, parseMapsLink } from "../lib/maps";
 import { mobileDigits } from "../lib/phone";
 
 type Lead = {
@@ -81,18 +81,28 @@ export function LeadsPage() {
 
   async function findAddress() {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ");
+    const query = [address, city].filter(Boolean).join(", ").trim();
     if (query.length < 3) {
-      setError("Type the shop address or city first.");
+      setError("Type the shop address, or paste a Google Maps link.");
       return;
     }
     setError("");
+    const local = parseMapsLink(query);
+    if (local) {
+      setPin({ lat: local.lat, lng: local.lng });
+      setNotice("Pin set from the map link. Check it on the map, then save.");
+      return;
+    }
     try {
-      const hits = await api<{ lat: number; lng: number }[]>(`/geo?q=${encodeURIComponent(query)}`, {
+      const hits = await api<{ lat: number; lng: number; kind?: string }[]>(`/geo?q=${encodeURIComponent(query)}`, {
         token: accessToken,
       });
       if (!hits.length) {
-        setError("Could not find that address. Click the map to drop a pin.");
+        setError(
+          looksLikeMapsLink(query)
+            ? "Could not read that Google Maps link. Paste the full link from the browser, or click the map."
+            : "Could not find that address. Click the map to drop a pin.",
+        );
         return;
       }
       setPin({ lat: hits[0].lat, lng: hits[0].lng });
@@ -268,8 +278,12 @@ export function LeadsPage() {
               </select>
             </label>
             <label>
-              Address
-              <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area" />
+              Address or Google Maps link
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Street, area — or paste Google Maps link"
+              />
             </label>
             <label>
               City
@@ -278,7 +292,7 @@ export function LeadsPage() {
           </div>
           <div className="toolbar">
             <button className="btn blue" type="button" onClick={findAddress}>
-              Find address on map
+              Find address / map link
             </button>
             <button className="link" type="button" onClick={useMyLocation}>
               Use my location

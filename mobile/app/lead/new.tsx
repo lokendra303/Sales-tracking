@@ -169,7 +169,20 @@ export default function NewLeadScreen() {
           <Button title="Use my GPS here" icon="locate-outline" tone="outline" onPress={pinShop} loading={pinning} flex />
         </ActionRow>
       </View>
-      <LocationPicker visible={mapOpen} initial={pin} onClose={() => setMapOpen(false)} onPick={pickPlace} />
+      <LocationPicker
+        visible={mapOpen}
+        initial={pin}
+        onClose={() => setMapOpen(false)}
+        onPick={pickPlace}
+        resolveSearch={
+          accessToken
+            ? async (q) =>
+                api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(q)}`, {
+                  token: accessToken,
+                })
+            : undefined
+        }
+      />
       <Field label="Potential ₹" value={potential} onChangeText={setPotential} keyboardType="numeric" placeholder="Expected value" />
       <View style={styles.field}>
         <Text style={styles.label}>Temperature</Text>

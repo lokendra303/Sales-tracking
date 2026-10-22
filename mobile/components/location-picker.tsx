@@ -7,6 +7,7 @@ import { PickMap, type PickMapHandle } from "@/components/pick-map";
 import { Button } from "@/components/ui";
 import { bestFix, loadLocation } from "@/lib/device-location";
 import { INDIA, pickerHtml, type MapMessage } from "@/lib/map-html";
+import { looksLikeMapsLink, parseMapsLink } from "@/lib/maps-link";
 import { colors, radius, shadow, typo } from "@/lib/theme";
 
 export type PickedPlace = { lat: number; lng: number; address?: string; city?: string; label?: string };
@@ -14,6 +15,7 @@ export type PickedPlace = { lat: number; lng: number; address?: string; city?: s
 type LatLng = { lat: number; lng: number };
 type View3 = LatLng & { zoom: number };
 type Place = { label: string; address?: string; city?: string };
+type SearchHit = { lat: number; lng: number; label?: string };
 
 // Below this zoom the pin covers a whole neighbourhood, so it cannot mark one shop.
 const MIN_ZOOM = 15;
@@ -38,6 +40,8 @@ type Props = {
   initial: LatLng | null;
   onClose: () => void;
   onPick: (place: PickedPlace) => void;
+  /** Backend /geo (needed for short maps.app.goo.gl links). */
+  resolveSearch?: (query: string) => Promise<SearchHit[]>;
 };
 
 export function LocationPicker(props: Props) {
@@ -48,7 +52,7 @@ export function LocationPicker(props: Props) {
   );
 }
 
-function PickerBody({ initial, onClose, onPick }: Props) {
+function PickerBody({ initial, onClose, onPick, resolveSearch }: Props) {
   const insets = useSafeAreaInsets();
   const map = useRef<PickMapHandle>(null);
   const [start] = useState<View3>(() => (initial ? { ...initial, zoom: 18 } : INDIA));
@@ -167,17 +171,43 @@ function PickerBody({ initial, onClose, onPick }: Props) {
   async function search() {
     const text = query.trim();
     if (!text) return;
-    const Location = location.current ?? (await loadLocation());
-    if (!Location) return;
     setSearching(true);
     try {
+      const fromLink = parseMapsLink(text);
+      if (fromLink) {
+        userMoved.current = true;
+        moveTo(fromLink.lat, fromLink.lng, 17);
+        return;
+      }
+
+      if (resolveSearch && (looksLikeMapsLink(text) || text.length >= 3)) {
+        const hits = await resolveSearch(text);
+        if (hits.length) {
+          userMoved.current = true;
+          moveTo(hits[0]!.lat, hits[0]!.lng, 17);
+          return;
+        }
+        if (looksLikeMapsLink(text)) {
+          Alert.alert(
+            "Link not read",
+            "Paste the full Google Maps link from the browser bar, or search by area name.",
+          );
+          return;
+        }
+      }
+
+      const Location = location.current ?? (await loadLocation());
+      if (!Location) {
+        Alert.alert("Search not available", "Drag the map by hand to the shop.");
+        return;
+      }
       const hits = await Location.geocodeAsync(text);
       if (!hits.length) {
-        Alert.alert("Not found", "Try the area, a landmark or the city name.");
+        Alert.alert("Not found", "Try the area, a landmark, city name, or paste a Google Maps link.");
         return;
       }
       userMoved.current = true;
-      moveTo(hits[0].latitude, hits[0].longitude, 17);
+      moveTo(hits[0]!.latitude, hits[0]!.longitude, 17);
     } catch {
       Alert.alert("Search not available", "Drag the map by hand to the shop.");
     } finally {
@@ -233,7 +263,7 @@ function PickerBody({ initial, onClose, onPick }: Props) {
             value={query}
             onChangeText={setQuery}
             onSubmitEditing={search}
-            placeholder="Search area, landmark or city"
+            placeholder="Address, landmark, or paste Maps link"
             placeholderTextColor={colors.muted}
             returnKeyType="search"
             style={styles.searchInput}

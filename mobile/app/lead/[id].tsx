@@ -11,6 +11,7 @@ import { api, type Lead } from "@/lib/api";
 import { bestFix, loadLocation } from "@/lib/device-location";
 import { useReminders } from "@/lib/reminders-context";
 import { leadIsOpen, leadStateLabel, money, openCall, openMapPin, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
+import { looksLikeMapsLink, parseMapsLink } from "@/lib/maps-link";
 import { isManager, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
@@ -155,9 +156,16 @@ export default function LeadDetailScreen() {
 
   async function findAddress() {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ");
+    const query = [address, city].filter(Boolean).join(", ").trim();
     if (query.length < 3) {
-      Alert.alert("Address needed", "Type the shop address or city first.");
+      Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
+      return;
+    }
+    const local = parseMapsLink(query);
+    if (local) {
+      setPin({ lat: local.lat, lng: local.lng });
+      setMatches([{ lat: local.lat, lng: local.lng, label: local.label }]);
+      Alert.alert("Pin set", "From the map link. Tap Save location to keep it.");
       return;
     }
     setLocating(true);
@@ -166,8 +174,14 @@ export default function LeadDetailScreen() {
         token: accessToken,
       });
       setMatches(hits);
-      if (!hits.length) Alert.alert("No match", "Stand at the shop and tap Use my GPS here.");
-      else setPin({ lat: hits[0].lat, lng: hits[0].lng });
+      if (!hits.length) {
+        Alert.alert(
+          "No match",
+          looksLikeMapsLink(query)
+            ? "Could not read that Google Maps link. Paste the full link from the browser, or use GPS at the shop."
+            : "Stand at the shop and tap Use my GPS here.",
+        );
+      } else setPin({ lat: hits[0].lat, lng: hits[0].lng });
     } catch (err) {
       Alert.alert("Could not search", err instanceof Error ? err.message : "Try again.");
     } finally {
@@ -397,10 +411,15 @@ export default function LeadDetailScreen() {
           </Text>
           {editing ? (
             <>
-              <Field label="Address" value={address} onChangeText={setAddress} placeholder="Street, area, landmark" />
+              <Field
+                label="Address or Google Maps link"
+                value={address}
+                onChangeText={setAddress}
+                placeholder="Street, area — or paste Maps link"
+              />
               <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
               <ActionRow>
-                <Button title="Find address" tone="outline" flex onPress={findAddress} disabled={locating} />
+                <Button title="Find address / link" tone="outline" flex onPress={findAddress} disabled={locating} />
                 <Button title="Use my GPS here" tone="outline" flex onPress={pinHere} disabled={locating} />
               </ActionRow>
               {matches.length > 1
