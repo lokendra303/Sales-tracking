@@ -16,8 +16,8 @@ export function isSales(roles: string[] = []) {
 
 export function roleLabel(roles: string[] = []) {
   if (isAdmin(roles)) return "Admin";
-  if (isManager(roles)) return "Manager";
-  if (roles.includes("SALES_EXECUTIVE")) return "Sales Executive";
+  if (isManager(roles)) return "Desk login";
+  if (roles.includes("SALES_EXECUTIVE")) return "Field (phone)";
   return roles[0] ?? "";
 }
 

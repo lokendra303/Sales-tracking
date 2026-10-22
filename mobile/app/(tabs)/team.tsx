@@ -73,9 +73,9 @@ export default function TeamScreen() {
       header={
         <ScreenHeader
           title={admin ? "Managers" : "Team"}
-          subtitle={admin ? "System admin — managers only" : "Your sales executives"}
+          subtitle={admin ? "System admin — managers only" : "Field executives and desk logins"}
           right={
-            <Pressable style={styles.add} onPress={() => router.push("/user/new")} accessibilityLabel={admin ? "Add manager" : "Add employee"}>
+            <Pressable style={styles.add} onPress={() => router.push("/user/new")} accessibilityLabel={admin ? "Add manager" : "Add person"}>
               <Ionicons name="add" size={22} color="#fff" />
             </Pressable>
           }
@@ -88,7 +88,11 @@ export default function TeamScreen() {
           <View style={styles.summaryDivider} />
           <SummaryCell value={field.filter((row) => row.fieldStatus === "ACTIVE").length} label="In field" color={colors.amber} />
           <View style={styles.summaryDivider} />
-          <SummaryCell value={users.length} label="Executives" color={colors.blue} />
+          <SummaryCell
+            value={users.filter((row) => row.roles.includes("SALES_EXECUTIVE")).length}
+            label="Field"
+            color={colors.blue}
+          />
         </View>
       ) : null}
       {manager ? (
@@ -119,7 +123,7 @@ export default function TeamScreen() {
         </Card>
       ) : null}
       {manager && !admin ? (
-        <Button title="Add sales employee" tone="green" icon="person-add-outline" onPress={() => router.push("/user/new")} />
+        <Button title="Add person" tone="green" icon="person-add-outline" onPress={() => router.push("/user/new")} />
       ) : null}
       {loading ? (
         <ActivityIndicator color={colors.blue} />
@@ -127,10 +131,10 @@ export default function TeamScreen() {
         <>
           <EmptyState
             icon="people-outline"
-            text={admin ? "No managers yet" : "No sales executives yet. Tap Add sales employee to create one."}
+            text={admin ? "No managers yet" : "No team yet. Add a field executive or a desk login."}
           />
           {!admin ? (
-            <Button title="Add sales employee" tone="green" onPress={() => router.push("/user/new")} />
+            <Button title="Add person" tone="green" onPress={() => router.push("/user/new")} />
           ) : null}
         </>
       ) : (
@@ -153,7 +157,7 @@ export default function TeamScreen() {
                   </Text>
                   <Text style={typo.muted} numberOfLines={1}>
                     {manager
-                      ? [item.employeeId, item.designation, item.phone].filter(Boolean).join(" · ")
+                      ? [roleLabel(item.roles), item.employeeId, item.designation, item.phone].filter(Boolean).join(" · ")
                       : `${roleLabel(item.roles)} · ${item.phone}`}
                   </Text>
                   {inField ? (
@@ -175,16 +179,20 @@ export default function TeamScreen() {
                     label="Edit"
                     onPress={() => router.push(`/user/${item.id}` as Href)}
                   />
-                  <MiniAction
-                    icon="briefcase-outline"
-                    label="Leads"
-                    onPress={() => router.push({ pathname: "/leads", params: { assigneeId: String(item.id) } })}
-                  />
-                  <MiniAction
-                    icon="camera-outline"
-                    label="Visits"
-                    onPress={() => router.push({ pathname: "/visits", params: { userId: String(item.id) } })}
-                  />
+                  {item.roles.includes("SALES_EXECUTIVE") ? (
+                    <>
+                      <MiniAction
+                        icon="briefcase-outline"
+                        label="Leads"
+                        onPress={() => router.push({ pathname: "/leads", params: { assigneeId: String(item.id) } })}
+                      />
+                      <MiniAction
+                        icon="camera-outline"
+                        label="Visits"
+                        onPress={() => router.push({ pathname: "/visits", params: { userId: String(item.id) } })}
+                      />
+                    </>
+                  ) : null}
                   <MiniAction icon="call-outline" label="Call" onPress={() => openCall(item.phone)} />
                   {streaming ? (
                     <MiniAction

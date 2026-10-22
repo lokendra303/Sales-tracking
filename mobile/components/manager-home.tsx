@@ -196,7 +196,7 @@ export function ManagerHome({
         <ActionTile icon="briefcase-outline" label="Leads" tone="amber" onPress={() => router.push("/leads")} />
         <ActionTile icon="bar-chart-outline" label="Reports" tone="slate" onPress={() => router.push("/reports")} />
         <ActionTile icon="add-circle-outline" label={"Add\nlead"} tone="amber" onPress={() => router.push("/lead/new")} />
-        <ActionTile icon="person-add-outline" label={"Add\nemployee"} tone="green" onPress={() => router.push("/user/new")} />
+        <ActionTile icon="person-add-outline" label={"Add\nperson"} tone="green" onPress={() => router.push("/user/new")} />
       </ScrollView>
 
       <SectionTitle title="Team right now" action="See all" onAction={() => router.push("/team")} />

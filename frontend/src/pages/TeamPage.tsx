@@ -20,6 +20,8 @@ type Person = {
   roles: string[];
 };
 
+type AccountKind = "SALES_EXECUTIVE" | "MANAGER";
+
 type FormState = {
   name: string;
   phone: string;
@@ -31,6 +33,7 @@ type FormState = {
   address: string;
   joiningDate: string;
   status: "ACTIVE" | "DISABLED";
+  role: AccountKind;
 };
 
 const emptyForm: FormState = {
@@ -44,6 +47,7 @@ const emptyForm: FormState = {
   address: "",
   joiningDate: "",
   status: "ACTIVE",
+  role: "SALES_EXECUTIVE",
 };
 
 function dayValue(iso: string | null) {
@@ -90,6 +94,7 @@ export function TeamPage() {
       address: person.address ?? "",
       joiningDate: dayValue(person.joiningDate),
       status: person.status === "DISABLED" ? "DISABLED" : "ACTIVE",
+      role: person.roles.includes("MANAGER") ? "MANAGER" : "SALES_EXECUTIVE",
     });
   }
 
@@ -139,9 +144,14 @@ export function TeamPage() {
             city: form.city,
             address: form.address || undefined,
             joiningDate: form.joiningDate || undefined,
+            role: form.role,
           }),
         });
-        setIssued(`Give this employee ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`);
+        setIssued(
+          form.role === "MANAGER"
+            ? `Desk login ready: give them ${form.phone} / ${form.password}. They use SalesTrack Desk with their own login — not yours.`
+            : `Give this employee ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`,
+        );
         setForm(emptyForm);
         setShowMore(false);
       }
@@ -157,10 +167,56 @@ export function TeamPage() {
     <div className="page">
       <p className="kicker">Sales team</p>
       <h1>Team</h1>
-      <p className="muted">Add employees for the phone app. Edit any row later.</p>
+      <p className="muted">
+        Add field executives for the phone app, or desk logins so other people can run the portal with their own mobile +
+        password — never share yours.
+      </p>
 
       <form className="card form wide form-compact" onSubmit={onSubmit}>
-        <h2>{editingId ? "Edit employee" : "Add employee"}</h2>
+        <h2>{editingId ? "Edit person" : "Add person"}</h2>
+        {!editingId ? (
+          <fieldset className="account-kind">
+            <legend>Account type *</legend>
+            <label className="radio-row">
+              <input
+                type="radio"
+                name="accountKind"
+                checked={form.role === "SALES_EXECUTIVE"}
+                onChange={() => {
+                  setField("role", "SALES_EXECUTIVE");
+                  if (!form.designation || form.designation === "Desk assistant") {
+                    setField("designation", "Sales Executive");
+                  }
+                }}
+              />
+              <span>
+                <strong>Field (phone app)</strong>
+                <span className="muted"> — visits, beats, shop photos</span>
+              </span>
+            </label>
+            <label className="radio-row">
+              <input
+                type="radio"
+                name="accountKind"
+                checked={form.role === "MANAGER"}
+                onChange={() => {
+                  setField("role", "MANAGER");
+                  if (!form.designation || form.designation === "Sales Executive") {
+                    setField("designation", "Desk assistant");
+                  }
+                }}
+              />
+              <span>
+                <strong>Desk login</strong>
+                <span className="muted"> — web portal + app, own credentials</span>
+              </span>
+            </label>
+          </fieldset>
+        ) : (
+          <p className="muted">
+            Account type: {form.role === "MANAGER" ? "Desk login" : "Field (phone app)"} (cannot change after create)
+          </p>
+        )}
         <div className="grid-3">
           <label>
             Full name *
@@ -208,7 +264,7 @@ export function TeamPage() {
             </label>
           ) : (
             <label>
-              App password *
+              {form.role === "MANAGER" ? "Desk password *" : "App password *"}
               <PasswordField value={form.password} onChange={(value) => setField("password", value)} required autoComplete="new-password" />
             </label>
           )}
@@ -232,7 +288,7 @@ export function TeamPage() {
 
         <div className="actions">
           <button className="btn green" disabled={busy}>
-            {busy ? "Saving…" : editingId ? "Save changes" : "Add employee"}
+            {busy ? "Saving…" : editingId ? "Save changes" : form.role === "MANAGER" ? "Add desk login" : "Add field employee"}
           </button>
           {editingId ? (
             <button type="button" className="btn" onClick={cancelEdit}>
@@ -249,6 +305,7 @@ export function TeamPage() {
           <thead>
             <tr>
               <th>Name</th>
+              <th>Type</th>
               <th>Employee ID</th>
               <th>Phone</th>
               <th>City</th>
@@ -257,12 +314,15 @@ export function TeamPage() {
             </tr>
           </thead>
           <tbody>
-            {people.map((item) => (
+            {people.map((item) => {
+              const desk = item.roles.includes("MANAGER");
+              return (
               <tr key={item.id}>
                 <td>
                   <strong>{item.name}</strong>
                   <div className="muted">{item.designation || roleLabel(item.roles)}</div>
                 </td>
+                <td>{roleLabel(item.roles)}</td>
                 <td>{item.employeeId || "—"}</td>
                 <td>{item.phone}</td>
                 <td>{item.city || "—"}</td>
@@ -271,13 +331,18 @@ export function TeamPage() {
                   <button type="button" className="link" onClick={() => startEdit(item)}>
                     Edit
                   </button>
-                  {" · "}
-                  <Link to={`/leads?assigneeId=${item.id}`}>Leads</Link>
-                  {" · "}
-                  <Link to={`/visits?userId=${item.id}`}>Visits</Link>
+                  {!desk ? (
+                    <>
+                      {" · "}
+                      <Link to={`/leads?assigneeId=${item.id}`}>Leads</Link>
+                      {" · "}
+                      <Link to={`/visits?userId=${item.id}`}>Visits</Link>
+                    </>
+                  ) : null}
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>

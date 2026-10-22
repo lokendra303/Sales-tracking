@@ -1,25 +1,38 @@
 import { useState } from "react";
 import { goBack } from "@/lib/nav";
-import { Alert, Text } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Button, Field, PasswordField, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { isAdmin } from "@/lib/roles";
-import { typo } from "@/lib/theme";
+import { colors, radius, typo } from "@/lib/theme";
+
+type AccountKind = "SALES_EXECUTIVE" | "MANAGER";
 
 export default function NewUserScreen() {
   const { accessToken, user } = useAuth();
   const admin = isAdmin(user?.roles);
+  const [role, setRole] = useState<AccountKind>("SALES_EXECUTIVE");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [employeeId, setEmployeeId] = useState("");
-  const [designation, setDesignation] = useState("");
+  const [designation, setDesignation] = useState("Sales Executive");
   const [city, setCity] = useState("");
   const [address, setAddress] = useState("");
   const [joiningDate, setJoiningDate] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function pickRole(next: AccountKind) {
+    setRole(next);
+    if (next === "MANAGER" && (designation === "Sales Executive" || !designation.trim())) {
+      setDesignation("Desk assistant");
+    }
+    if (next === "SALES_EXECUTIVE" && (designation === "Desk assistant" || !designation.trim())) {
+      setDesignation("Sales Executive");
+    }
+  }
 
   async function save() {
     if (!accessToken) return;
@@ -36,7 +49,7 @@ export default function NewUserScreen() {
       return;
     }
     if (password.length < 6) {
-      Alert.alert("Weak password", "Use at least 6 characters for the app password.");
+      Alert.alert("Weak password", "Use at least 6 characters for the password.");
       return;
     }
     setLoading(true);
@@ -54,9 +67,15 @@ export default function NewUserScreen() {
           address: address.trim() || undefined,
           joiningDate: joiningDate.trim() || undefined,
           password,
+          role,
         }),
       });
-      Alert.alert("Employee saved", `${name.trim()} can sign in on the phone with mobile + password.`);
+      Alert.alert(
+        role === "MANAGER" ? "Desk login saved" : "Employee saved",
+        role === "MANAGER"
+          ? `${name.trim()} can sign in on SalesTrack Desk with mobile + password (their own — not yours).`
+          : `${name.trim()} can sign in on the phone with mobile + password.`,
+      );
       goBack("/team");
     } catch (err) {
       Alert.alert("Could not save", err instanceof Error ? err.message : "Try again.");
@@ -66,14 +85,28 @@ export default function NewUserScreen() {
   }
 
   return (
-    <Screen keyboard header={<ScreenHeader title={admin ? "Add manager" : "Add employee"} back align="center" fallback="/team" />}>
+    <Screen keyboard header={<ScreenHeader title={admin ? "Add manager" : "Add person"} back align="center" fallback="/team" />}>
       <Text style={typo.muted}>
         {admin
           ? "System admins approve manager registrations on the desk. They do not add employees here."
-          : "Add a sales executive. Fields marked * are required. They log in on the phone with mobile + password."}
+          : "Add a field executive for the phone app, or a desk login so someone else can run the portal with their own credentials."}
       </Text>
       {admin ? null : (
         <>
+          <Text style={styles.kindLabel}>Account type *</Text>
+          <View style={styles.kindRow}>
+            <Pressable
+              style={[styles.kindChip, role === "SALES_EXECUTIVE" && styles.kindOn]}
+              onPress={() => pickRole("SALES_EXECUTIVE")}
+            >
+              <Text style={[styles.kindTitle, role === "SALES_EXECUTIVE" && styles.kindTitleOn]}>Field</Text>
+              <Text style={styles.kindHint}>Phone app only</Text>
+            </Pressable>
+            <Pressable style={[styles.kindChip, role === "MANAGER" && styles.kindOn]} onPress={() => pickRole("MANAGER")}>
+              <Text style={[styles.kindTitle, role === "MANAGER" && styles.kindTitleOn]}>Desk login</Text>
+              <Text style={styles.kindHint}>Web portal + app</Text>
+            </Pressable>
+          </View>
           <Field label="Full name *" value={name} onChangeText={setName} placeholder="Full name" autoCapitalize="words" />
           <Field label="Employee ID *" value={employeeId} onChangeText={setEmployeeId} placeholder="EMP001" autoCapitalize="characters" />
           <Field
@@ -90,10 +123,34 @@ export default function NewUserScreen() {
           <Field label="City *" value={city} onChangeText={setCity} placeholder="City" autoCapitalize="words" />
           <Field label="Joining date (YYYY-MM-DD)" value={joiningDate} onChangeText={setJoiningDate} placeholder="2026-10-15" autoCapitalize="none" />
           <Field label="Address" value={address} onChangeText={setAddress} placeholder="Optional" multiline />
-          <PasswordField label="App password *" value={password} onChangeText={setPassword} />
-          <Button title="Save employee" tone="green" onPress={save} loading={loading} />
+          <PasswordField label={role === "MANAGER" ? "Desk password *" : "App password *"} value={password} onChangeText={setPassword} />
+          <Button
+            title={role === "MANAGER" ? "Save desk login" : "Save field employee"}
+            tone="green"
+            onPress={save}
+            loading={loading}
+          />
         </>
       )}
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  kindLabel: { ...typo.muted, fontWeight: "700", marginTop: 4 },
+  kindRow: { flexDirection: "row", gap: 10 },
+  kindChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: "#fff",
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    gap: 2,
+  },
+  kindOn: { borderColor: colors.blue, backgroundColor: "#EFF6FF" },
+  kindTitle: { fontWeight: "800", color: colors.text },
+  kindTitleOn: { color: colors.blue },
+  kindHint: { ...typo.muted, fontSize: 12 },
+});

@@ -12,7 +12,14 @@ export const usersRouter = Router();
 
 usersRouter.use(requireAuth, requireRole("ADMIN", "MANAGER"));
 
-function managedRole(roles: RoleCode[]): RoleCode {
+/** Roles the actor may list / edit. */
+function managedRoles(roles: RoleCode[]): RoleCode[] {
+  if (roles.includes("ADMIN")) return ["MANAGER"];
+  // Managers see field executives and other desk logins they added.
+  return ["MANAGER", "SALES_EXECUTIVE"];
+}
+
+function defaultCreateRole(roles: RoleCode[]): RoleCode {
   if (roles.includes("ADMIN")) return "MANAGER";
   return "SALES_EXECUTIVE";
 }
@@ -57,7 +64,7 @@ async function loadManaged(tenantId: number, actorRoles: RoleCode[], userId: num
     where: {
       id: userId,
       tenantId,
-      roles: { some: { role: { code: managedRole(actorRoles) } } },
+      roles: { some: { role: { code: { in: managedRoles(actorRoles) } } } },
     },
     include: personInclude,
   });
@@ -71,7 +78,7 @@ usersRouter.get(
     const users = await prisma.user.findMany({
       where: {
         tenantId: req.auth!.tenantId,
-        roles: { some: { role: { code: managedRole(req.auth!.roles) } } },
+        roles: { some: { role: { code: { in: managedRoles(req.auth!.roles) } } } },
       },
       include: personInclude,
       orderBy: { name: "asc" },
@@ -98,6 +105,7 @@ const createUserSchema = z.object({
   city: z.string().trim().min(2, "Enter the city.").max(80),
   address: z.string().trim().max(500).optional(),
   joiningDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter joining date as YYYY-MM-DD.").optional(),
+  /** Field = phone app only. Desk = web portal + mobile (own login, not the manager password). */
   role: z.enum(["MANAGER", "SALES_EXECUTIVE"]).optional(),
   teamId: z.number().int().positive().optional(),
 });
@@ -108,12 +116,17 @@ usersRouter.post(
     if (req.auth!.roles.includes("ADMIN")) {
       throw forbidden("Managers register themselves. Approve them under Registrations.");
     }
+    if (!req.auth!.roles.includes("MANAGER")) {
+      throw forbidden("Only managers can add team logins.");
+    }
+
     const body = createUserSchema.parse(req.body);
     const tenantId = req.auth!.tenantId;
-    const roleCode = managedRole(req.auth!.roles);
+    const roleCode = body.role ?? defaultCreateRole(req.auth!.roles);
+    const allowed = managedRoles(req.auth!.roles);
 
-    if (body.role && body.role !== roleCode) {
-      throw forbidden("Managers can only add sales executives.");
+    if (!allowed.includes(roleCode)) {
+      throw forbidden("You can only add field executives or desk logins.");
     }
 
     const phoneTaken = await prisma.user.findFirst({ where: { tenantId, phone: body.phone } });
@@ -174,6 +187,10 @@ usersRouter.put(
     const body = updateUserSchema.parse(req.body);
     const current = await loadManaged(req.auth!.tenantId, req.auth!.roles, Number(req.params.id));
     const tenantId = req.auth!.tenantId;
+
+    if (current.id === req.auth!.userId && body.status === "DISABLED") {
+      throw badRequest("You cannot turn off your own login.");
+    }
 
     if (body.phone && body.phone !== current.phone) {
       const phoneTaken = await prisma.user.findFirst({

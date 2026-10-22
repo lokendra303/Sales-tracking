@@ -114,6 +114,34 @@ a:hover { color: var(--teal-2); }
   align-items: start;
 }
 .profile-hero { margin-bottom: 16px; }
+.account-kind {
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 0 0 4px;
+  display: grid;
+  gap: 8px;
+}
+.account-kind legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted, #64748b);
+}
+.radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.radio-row input {
+  margin-top: 3px;
+}
+.radio-row .muted {
+  font-weight: 400;
+}
+
 .form-compact { gap: 10px; width: 100%; max-width: none; }
 .form-compact .grid-3 {
   display: grid;
