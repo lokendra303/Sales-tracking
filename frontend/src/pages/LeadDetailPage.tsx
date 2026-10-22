@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type ClipboardEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MapView } from "../components/MapView";
 import { useExecutives } from "../components/ExecFilter";
@@ -53,6 +53,7 @@ export function LeadDetailPage() {
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [matches, setMatches] = useState<GeoHit[]>([]);
   const [saving, setSaving] = useState(false);
+  const [finding, setFinding] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -159,9 +160,9 @@ export function LeadDetailPage() {
     }
   }
 
-  async function findAddress() {
+  async function findAddress(override?: string) {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ").trim();
+    const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
     setError("");
     setNotice("");
     setMatches([]);
@@ -173,15 +174,16 @@ export function LeadDetailPage() {
     if (local) {
       setPin({ lat: local.lat, lng: local.lng });
       setMatches([{ lat: local.lat, lng: local.lng, label: local.label, kind: "coordinates" }]);
-      setNotice("Pin set from the map link. Save location to keep it.");
+      setNotice("Pin moved to the Google Maps link. Click Save location.");
       return;
     }
+    setFinding(true);
     try {
       const hits = await api<GeoHit[]>(`/geo?q=${encodeURIComponent(query)}`, { token: accessToken });
       if (!hits.length) {
         setError(
           looksLikeMapsLink(query)
-            ? "Could not read that Google Maps link. Open it, copy the full link from the browser bar, or click the shop on the map."
+            ? "Could not read that Google Maps link. Open the link in Chrome, copy the long URL from the address bar, paste here, then Find again — or click the shop on the map."
             : "No match for that address. Click the exact shop on the map.",
         );
         return;
@@ -189,13 +191,24 @@ export function LeadDetailPage() {
       setMatches(hits);
       setPin({ lat: hits[0].lat, lng: hits[0].lng });
       setNotice(
-        hits[0].kind === "coordinates"
-          ? "Pin set from the map link. Save location to keep it."
+        hits[0].kind === "coordinates" || looksLikeMapsLink(query)
+          ? "Pin moved to the Google Maps link. Click Save location."
           : "Address found — confirm the pin on the map, then save.",
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not search that address.");
+    } finally {
+      setFinding(false);
     }
+  }
+
+  function onAddressPaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pasted = event.clipboardData.getData("text").trim();
+    if (!looksLikeMapsLink(pasted)) return;
+    // Paste into the field, then resolve so the pin leaves live GPS.
+    event.preventDefault();
+    setAddress(pasted);
+    void findAddress(pasted);
   }
 
   function useMyLocation() {
@@ -389,7 +402,8 @@ export function LeadDetailPage() {
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              placeholder="Street, area — or paste maps.app.goo.gl / Google Maps link"
+              onPaste={onAddressPaste}
+              placeholder="Paste maps.app.goo.gl link — pin updates automatically"
             />
           </label>
           <label>
@@ -397,9 +411,13 @@ export function LeadDetailPage() {
             <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
           </label>
         </div>
+        <p className="muted">
+          Pasting a Google Maps link moves the pin to that place. “Use my location” is only your live GPS — do not use it if
+          you already pasted a shop link.
+        </p>
         <div className="toolbar">
-          <button className="btn blue" type="button" onClick={findAddress}>
-            Find address / map link
+          <button className="btn blue" type="button" onClick={() => findAddress()} disabled={finding}>
+            {finding ? "Reading map link…" : "Find address / map link"}
           </button>
           <button className="link" type="button" onClick={useMyLocation}>
             Use my location

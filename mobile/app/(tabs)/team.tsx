@@ -18,6 +18,7 @@ type TeamUser = {
   city?: string | null;
   status: string;
   roles: string[];
+  isOwner?: boolean;
 };
 
 export default function TeamScreen() {
@@ -93,6 +94,12 @@ export default function TeamScreen() {
             label="Field"
             color={colors.blue}
           />
+          <View style={styles.summaryDivider} />
+          <SummaryCell
+            value={users.filter((row) => row.roles.includes("MANAGER")).length}
+            label="Desk"
+            color={colors.blue}
+          />
         </View>
       ) : null}
       {manager ? (
@@ -123,7 +130,22 @@ export default function TeamScreen() {
         </Card>
       ) : null}
       {manager && !admin ? (
-        <Button title="Add person" tone="green" icon="person-add-outline" onPress={() => router.push("/user/new")} />
+        <>
+          <Card>
+            <Text style={styles.name}>Shared desk access</Text>
+            <Text style={typo.muted}>
+              Add desk logins so other people manage the same company portal with their own mobile + password. Do not share
+              your personal login.
+            </Text>
+          </Card>
+          <Button
+            title="Add desk login"
+            tone="green"
+            icon="key-outline"
+            onPress={() => router.push({ pathname: "/user/new", params: { kind: "desk" } })}
+          />
+          <Button title="Add field employee" tone="outline" icon="person-add-outline" onPress={() => router.push("/user/new")} />
+        </>
       ) : null}
       {loading ? (
         <ActivityIndicator color={colors.blue} />
@@ -134,7 +156,14 @@ export default function TeamScreen() {
             text={admin ? "No managers yet" : "No team yet. Add a field executive or a desk login."}
           />
           {!admin ? (
-            <Button title="Add person" tone="green" onPress={() => router.push("/user/new")} />
+            <>
+              <Button
+                title="Add desk login"
+                tone="green"
+                onPress={() => router.push({ pathname: "/user/new", params: { kind: "desk" } })}
+              />
+              <Button title="Add field employee" tone="outline" onPress={() => router.push("/user/new")} />
+            </>
           ) : null}
         </>
       ) : (
@@ -157,7 +186,14 @@ export default function TeamScreen() {
                   </Text>
                   <Text style={typo.muted} numberOfLines={1}>
                     {manager
-                      ? [roleLabel(item.roles), item.employeeId, item.designation, item.phone].filter(Boolean).join(" · ")
+                      ? [
+                          item.isOwner ? "Main manager" : roleLabel(item.roles),
+                          item.employeeId,
+                          item.designation,
+                          item.phone,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
                       : `${roleLabel(item.roles)} · ${item.phone}`}
                   </Text>
                   {inField ? (

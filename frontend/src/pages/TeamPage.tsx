@@ -18,6 +18,7 @@ type Person = {
   joiningDate: string | null;
   status: string;
   roles: string[];
+  isOwner?: boolean;
 };
 
 type AccountKind = "SALES_EXECUTIVE" | "MANAGER";
@@ -56,7 +57,7 @@ function dayValue(iso: string | null) {
 }
 
 export function TeamPage() {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const [people, setPeople] = useState<Person[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -64,6 +65,13 @@ export function TeamPage() {
   const [issued, setIssued] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const iAmOwner = Boolean(user?.isOwner);
+  const editingPerson = editingId ? people.find((p) => p.id === editingId) : null;
+  const canToggleStatus =
+    Boolean(editingPerson) &&
+    editingPerson!.id !== user?.id &&
+    !editingPerson!.isOwner &&
+    (iAmOwner || !editingPerson!.roles.includes("MANAGER"));
 
   async function load() {
     if (!accessToken) return;
@@ -125,10 +133,10 @@ export function TeamPage() {
             city: form.city,
             address: form.address || null,
             joiningDate: form.joiningDate || null,
-            status: form.status,
+            ...(canToggleStatus ? { status: form.status } : {}),
           }),
         });
-        setIssued("Employee details updated.");
+        setIssued("Details updated.");
         cancelEdit();
       } else {
         await api("/users", {
@@ -168,8 +176,9 @@ export function TeamPage() {
       <p className="kicker">Sales team</p>
       <h1>Team</h1>
       <p className="muted">
-        Add field executives for the phone app, or desk logins so other people can run the portal with their own mobile +
-        password — never share yours.
+        Add field executives for the phone app, or choose <strong>Desk login</strong> so other people manage the same
+        company portal with their own mobile + password. The main manager (registered with email)
+        {iAmOwner ? " — you —" : ""} can turn desk helpers Off anytime.
       </p>
 
       <form className="card form wide form-compact" onSubmit={onSubmit}>
@@ -255,13 +264,29 @@ export function TeamPage() {
             <input value={form.city} onChange={(e) => setField("city", e.target.value)} required />
           </label>
           {editingId ? (
-            <label>
-              Status
-              <select value={form.status} onChange={(e) => setField("status", e.target.value as FormState["status"])}>
-                <option value="ACTIVE">Active</option>
-                <option value="DISABLED">Off</option>
-              </select>
-            </label>
+            canToggleStatus ? (
+              <label>
+                Status
+                <select value={form.status} onChange={(e) => setField("status", e.target.value as FormState["status"])}>
+                  <option value="ACTIVE">Active</option>
+                  <option value="DISABLED">Off</option>
+                </select>
+              </label>
+            ) : (
+              <label>
+                Status
+                <input
+                  value={
+                    editingPerson?.isOwner
+                      ? "Main manager (cannot turn off)"
+                      : form.status === "ACTIVE"
+                        ? "Active"
+                        : "Off"
+                  }
+                  disabled
+                />
+              </label>
+            )
           ) : (
             <label>
               {form.role === "MANAGER" ? "Desk password *" : "App password *"}
@@ -322,7 +347,9 @@ export function TeamPage() {
                   <strong>{item.name}</strong>
                   <div className="muted">{item.designation || roleLabel(item.roles)}</div>
                 </td>
-                <td>{roleLabel(item.roles)}</td>
+                <td>
+                  {item.isOwner ? "Main manager" : roleLabel(item.roles)}
+                </td>
                 <td>{item.employeeId || "—"}</td>
                 <td>{item.phone}</td>
                 <td>{item.city || "—"}</td>

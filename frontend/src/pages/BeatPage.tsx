@@ -63,15 +63,49 @@ export function BeatPage() {
   const [q, setQ] = useState("");
   const [newName, setNewName] = useState("");
   const [newTerritory, setNewTerritory] = useState("");
+  const [hqFilter, setHqFilter] = useState<"all" | "none" | string>("all");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const selected = beats.find((b) => b.id === selectedBeatId) ?? null;
+
+  const hqOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const beat of beats) {
+      const raw = beat.territory?.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (!map.has(key)) map.set(key, raw);
+    }
+    return [...map.values()].sort((a, b) => a.localeCompare(b));
+  }, [beats]);
+
+  const matchesHq = (beat: Beat) => {
+    const hq = beat.territory?.trim() ?? "";
+    if (hqFilter === "all") return true;
+    if (hqFilter === "none") return !hq;
+    return hq.toLowerCase() === hqFilter.toLowerCase();
+  };
+
   const personBeats = useMemo(
-    () => beats.filter((b) => b.assigneeId === userId),
-    [beats, userId],
+    () => beats.filter((b) => b.assigneeId === userId && matchesHq(b)),
+    // matchesHq closes over hqFilter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [beats, userId, hqFilter],
   );
+
+  const listedBeats = useMemo(
+    () => beats.filter((b) => (!userId || b.assigneeId === userId) && matchesHq(b)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [beats, userId, hqFilter],
+  );
+
+  useEffect(() => {
+    if (selectedBeatId && !listedBeats.some((b) => b.id === selectedBeatId)) {
+      setSelectedBeatId(listedBeats[0]?.id ?? null);
+    }
+  }, [listedBeats, selectedBeatId]);
 
   const taken = useMemo(() => {
     const keys = new Set<string>();
@@ -294,9 +328,8 @@ export function BeatPage() {
       <p className="kicker">Field plan</p>
       <h1>Beats</h1>
       <p className="muted">
-        Create permanent beats with any number of shops, assign each to a salesperson, then set a rotating cycle (7,
-        15, 20, 30 days — or any length up to 90). The phone loads today’s beat from the cycle. Completion = visit
-        coverage (visited / total).
+        Create permanent beats with any number of shops under an HQ (e.g. NDL), assign each to a salesperson, then set a
+        rotating cycle (7, 15, 20, 30 days). The phone loads today’s beat from the cycle.
       </p>
 
       <div className="toolbar">
@@ -305,6 +338,25 @@ export function BeatPage() {
         </button>
         <button className={`btn ${tab === "schedule" ? "blue" : ""}`} type="button" onClick={() => setTab("schedule")}>
           Dynamic schedule
+        </button>
+      </div>
+
+      <div className="chips" role="tablist" aria-label="Filter by HQ">
+        <button type="button" className={hqFilter === "all" ? "chip on" : "chip"} onClick={() => setHqFilter("all")}>
+          All HQ
+        </button>
+        {hqOptions.map((hq) => (
+          <button
+            key={hq}
+            type="button"
+            className={hqFilter.toLowerCase() === hq.toLowerCase() ? "chip on" : "chip"}
+            onClick={() => setHqFilter(hq)}
+          >
+            {hq}
+          </button>
+        ))}
+        <button type="button" className={hqFilter === "none" ? "chip on" : "chip"} onClick={() => setHqFilter("none")}>
+          No HQ
         </button>
       </div>
       {notice ? <p className="on">{notice}</p> : null}
@@ -324,7 +376,8 @@ export function BeatPage() {
                 <div>
                   <strong>{person.name}</strong>
                   <div className="muted">
-                    {beats.filter((b) => b.assigneeId === person.userId).length} beats
+                    {beats.filter((b) => b.assigneeId === person.userId && matchesHq(b)).length} beats
+                    {hqFilter !== "all" ? ` · ${hqFilter === "none" ? "No HQ" : hqFilter}` : ""}
                   </div>
                 </div>
               </button>
@@ -346,7 +399,7 @@ export function BeatPage() {
               <input
                 value={newTerritory}
                 onChange={(e) => setNewTerritory(e.target.value)}
-                placeholder="Area e.g. Noida Sector 18"
+                placeholder="HQ e.g. NDL, PUNE 1"
                 style={{ flex: 1, minWidth: 160 }}
               />
               <button className="btn green" type="button" disabled={busy || !userId || !newName.trim()} onClick={createBeat}>
@@ -354,11 +407,14 @@ export function BeatPage() {
               </button>
             </div>
 
-            <h2>Beats</h2>
+            <h2>
+              Beats
+              {hqFilter !== "all" ? (
+                <span className="muted"> · {hqFilter === "none" ? "No HQ" : hqFilter}</span>
+              ) : null}
+            </h2>
             <div className="list">
-              {beats
-                .filter((b) => !userId || b.assigneeId === userId)
-                .map((b) => (
+              {listedBeats.map((b) => (
                   <button
                     key={b.id}
                     type="button"
@@ -370,13 +426,17 @@ export function BeatPage() {
                         {b.name}
                       </strong>
                       <div className="muted">
-                        {b.size} stops · {b.territory || "No area"} · {b.assigneeName}
+                        {b.size} stops · {b.territory || "No HQ"} · {b.assigneeName}
                       </div>
                     </div>
                   </button>
                 ))}
-              {!beats.filter((b) => !userId || b.assigneeId === userId).length ? (
-                <p className="muted">No beats yet. Create one above.</p>
+              {!listedBeats.length ? (
+                <p className="muted">
+                  {hqFilter === "all"
+                    ? "No beats yet. Create one above."
+                    : `No beats for ${hqFilter === "none" ? "No HQ" : hqFilter}. Pick another HQ or create a beat.`}
+                </p>
               ) : null}
             </div>
 

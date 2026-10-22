@@ -47,7 +47,14 @@ export function ManagerHome({
   const { accessToken } = useAuth();
   const [field, setField] = useState<FieldTeammate[]>([]);
   const [coverage, setCoverage] = useState<
-    { userId: number; name: string; beatName: string | null; stops: number; completed: number }[]
+    {
+      userId: number;
+      name: string;
+      beatName: string | null;
+      territory?: string | null;
+      stops: number;
+      completed: number;
+    }[]
   >([]);
 
   useFocusEffect(
@@ -57,10 +64,16 @@ export function ManagerHome({
         api<FieldTeammate[]>("/field/team", { token: accessToken })
           .then(setField)
           .catch(() => undefined);
-        api<{ people: { userId: number; name: string; beatName: string | null; stops: number; completed: number }[] }>(
-          "/beat/coverage/today",
-          { token: accessToken },
-        )
+        api<{
+          people: {
+            userId: number;
+            name: string;
+            beatName: string | null;
+            territory?: string | null;
+            stops: number;
+            completed: number;
+          }[];
+        }>("/beat/coverage/today", { token: accessToken })
           .then((data) => setCoverage(data.people ?? []))
           .catch(() => undefined);
       };
@@ -173,7 +186,7 @@ export function ManagerHome({
                   </Text>
                   <Text style={typo.muted} numberOfLines={1}>
                     {row.beatName
-                      ? `${row.beatName} · ${row.completed}/${row.stops} visited`
+                      ? `${row.beatName}${row.territory?.trim() ? ` · HQ ${row.territory.trim()}` : ""} · ${row.completed}/${row.stops} visited`
                       : "No beat scheduled today"}
                   </Text>
                 </View>
@@ -196,7 +209,12 @@ export function ManagerHome({
         <ActionTile icon="briefcase-outline" label="Leads" tone="amber" onPress={() => router.push("/leads")} />
         <ActionTile icon="bar-chart-outline" label="Reports" tone="slate" onPress={() => router.push("/reports")} />
         <ActionTile icon="add-circle-outline" label={"Add\nlead"} tone="amber" onPress={() => router.push("/lead/new")} />
-        <ActionTile icon="person-add-outline" label={"Add\nperson"} tone="green" onPress={() => router.push("/user/new")} />
+        <ActionTile
+          icon="key-outline"
+          label={"Desk\nlogin"}
+          tone="green"
+          onPress={() => router.push({ pathname: "/user/new", params: { kind: "desk" } })}
+        />
       </ScrollView>
 
       <SectionTitle title="Team right now" action="See all" onAction={() => router.push("/team")} />

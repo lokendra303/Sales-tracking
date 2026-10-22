@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { useField } from "@/lib/field";
 import { useOffline } from "@/lib/offline";
 import { api, type BeatPlan, type BeatToday, type FollowUp } from "@/lib/api";
-import { ageLabel, money, tomorrowDay, when } from "@/lib/format";
+import { ageLabel, money, openNavigate, tomorrowDay, when } from "@/lib/format";
 import { isAdmin, isManager, isOffice, isSales, roleLabel } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
@@ -183,7 +183,9 @@ export default function HomeScreen() {
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={styles.beatKicker}>Step 2 · Today’s target</Text>
               <Text style={styles.cardTitle}>{beatToday.beatName || "Today’s beat"}</Text>
-              {beatToday.territory ? <Text style={styles.beatTerritory}>{beatToday.territory}</Text> : null}
+              <Text style={styles.beatTerritory}>
+                HQ · {beatToday.territory?.trim() || "Not set"}
+              </Text>
               <Text style={styles.live}>
                 {beatToday.visitedOnBeat ?? beatToday.completedToday}/
                 {beatToday.beatSize ?? beatToday.stops.length} shops on this beat
@@ -247,8 +249,22 @@ export default function HomeScreen() {
           <Text style={styles.cardTitle}>{nextStop.visitStatus === "IN_PROGRESS" ? "Continue visit" : "Next stop"}</Text>
           <Text style={styles.live}>{nextStop.name}</Text>
           <Text style={typo.muted}>{[nextStop.address, nextStop.city].filter(Boolean).join(", ") || "Open Visits to check in"}</Text>
+          {nextStop.placeLat != null && nextStop.placeLng != null ? (
+            <Button
+              title="Follow map to shop"
+              tone="outline"
+              icon="navigate-outline"
+              onPress={() =>
+                openNavigate(
+                  nextStop.placeLat,
+                  nextStop.placeLng,
+                  [nextStop.address, nextStop.city].filter(Boolean).join(", "),
+                )
+              }
+            />
+          ) : null}
           <Button
-            title={nextStop.visitStatus === "IN_PROGRESS" ? "Continue visit" : "Check location"}
+            title={nextStop.visitStatus === "IN_PROGRESS" ? "Continue visit" : "Check in here"}
             tone="green"
             onPress={() =>
               nextStop.visitId

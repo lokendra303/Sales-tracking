@@ -192,7 +192,7 @@ export default function BeatDetailScreen() {
       <Card style={styles.hero}>
         <Text style={styles.heroKicker}>Beat target</Text>
         <Text style={styles.heroTitle}>{beat.name}</Text>
-        {beat.territory ? <Text style={typo.muted}>{beat.territory}</Text> : null}
+        <Text style={typo.muted}>HQ · {beat.territory?.trim() || "Not set"}</Text>
         <Text style={styles.heroMeta}>
           {beat.size} shop{beat.size === 1 ? "" : "s"} · salesperson runs these one by one today
         </Text>

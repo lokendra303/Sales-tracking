@@ -16,6 +16,12 @@ const leadInclude = {
     take: 1,
     select: { id: true, status: true, outcome: true, checkedInAt: true },
   },
+  beatMembers: {
+    include: {
+      beat: { select: { id: true, name: true, territory: true, active: true } },
+    },
+    orderBy: { sequence: "asc" as const },
+  },
 };
 
 function requireApproved(lead: { approvalStatus: string }) {

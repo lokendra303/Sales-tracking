@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type TeamPerson } from "@/lib/api";
-import { isManager } from "@/lib/roles";
+import { isManager, roleLabel } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
 function dayValue(iso: string | null) {
@@ -28,6 +28,16 @@ export default function EditUserScreen() {
   const [status, setStatus] = useState<"ACTIVE" | "DISABLED">("ACTIVE");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const deskLogin = Boolean(person?.roles?.includes("MANAGER"));
+  const isMainOwner = Boolean(person?.isOwner);
+  const iAmOwner = Boolean(user?.isOwner);
+  const canToggleStatus =
+    Boolean(person) &&
+    person!.id !== user?.id &&
+    !isMainOwner &&
+    (iAmOwner || !deskLogin);
+  const screenTitle = isMainOwner ? "Main manager" : deskLogin ? "Desk login" : "Field employee";
 
   const load = useCallback(() => {
     if (!accessToken || !id) return;
@@ -67,10 +77,13 @@ export default function EditUserScreen() {
           city,
           address: address || null,
           joiningDate: joiningDate || null,
-          status,
+          ...(canToggleStatus ? { status } : {}),
         }),
       });
-      Alert.alert("Saved", "Salesperson details updated.");
+      Alert.alert(
+        "Saved",
+        isMainOwner ? "Main manager details updated." : deskLogin ? "Desk login details updated." : "Field employee details updated.",
+      );
       router.replace("/team");
     } catch (err) {
       Alert.alert("Could not save", err instanceof Error ? err.message : "Try again.");
@@ -81,7 +94,7 @@ export default function EditUserScreen() {
 
   if (loading) {
     return (
-      <Screen header={<ScreenHeader title="Salesperson" back align="center" fallback="/team" />}>
+      <Screen header={<ScreenHeader title={screenTitle} back align="center" fallback="/team" />}>
         <ActivityIndicator color={colors.blue} />
       </Screen>
     );
@@ -89,7 +102,7 @@ export default function EditUserScreen() {
 
   if (!person) {
     return (
-      <Screen header={<ScreenHeader title="Salesperson" back align="center" fallback="/team" />}>
+      <Screen header={<ScreenHeader title={screenTitle} back align="center" fallback="/team" />}>
         <Text style={typo.muted}>Could not load this person.</Text>
       </Screen>
     );
@@ -97,7 +110,13 @@ export default function EditUserScreen() {
 
   return (
     <Screen keyboard header={<ScreenHeader title={person.name} back align="center" fallback="/team" />}>
-      <Text style={typo.muted}>Managers can update phone and profile details for their employees.</Text>
+      <Text style={typo.muted}>
+        {isMainOwner
+          ? "Main manager (registered with email). This login cannot be turned off by desk helpers."
+          : deskLogin
+            ? `${roleLabel(person.roles)} · same company portal with their own mobile + password.${iAmOwner ? " You can set status to Off." : ""}`
+            : `${roleLabel(person.roles)} · phone app only. Update profile details here.`}
+      </Text>
       <Field label="Full name *" value={name} onChangeText={setName} autoCapitalize="words" />
       <Field label="Employee ID *" value={employeeId} onChangeText={setEmployeeId} autoCapitalize="characters" />
       <Field label="Phone *" value={phone} onChangeText={setPhone} keyboardType="number-pad" digitsOnly />
@@ -106,17 +125,25 @@ export default function EditUserScreen() {
       <Field label="City *" value={city} onChangeText={setCity} autoCapitalize="words" />
       <Field label="Joining date (YYYY-MM-DD)" value={joiningDate} onChangeText={setJoiningDate} autoCapitalize="none" />
       <Field label="Address" value={address} onChangeText={setAddress} multiline />
-      <Text style={styles.label}>Status</Text>
-      <View style={styles.chips}>
-        <Chip label="Active" on={status === "ACTIVE"} onPress={() => setStatus("ACTIVE")} />
-        <Chip label="Off" on={status === "DISABLED"} onPress={() => setStatus("DISABLED")} />
-      </View>
-      {manager ? <Button title="Save changes" tone="green" onPress={save} loading={saving} /> : null}
+      {canToggleStatus ? (
+        <>
+          <Text style={styles.label}>Status</Text>
+          <View style={styles.row}>
+            <Chip label="Active" on={status === "ACTIVE"} onPress={() => setStatus("ACTIVE")} />
+            <Chip label="Off" on={status === "DISABLED"} onPress={() => setStatus("DISABLED")} />
+          </View>
+        </>
+      ) : (
+        <Text style={typo.muted}>
+          Status: {isMainOwner ? "Main manager (always on)" : status === "ACTIVE" ? "Active" : "Off"}
+        </Text>
+      )}
+      {manager ? <Button title={saving ? "Saving…" : "Save"} tone="green" onPress={save} disabled={saving} /> : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  label: { fontWeight: "800", color: colors.text, marginTop: 4 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  label: { ...typo.muted, marginTop: 8, marginBottom: 6 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
 });

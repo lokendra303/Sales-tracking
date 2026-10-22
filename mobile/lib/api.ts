@@ -21,6 +21,8 @@ export type ApiUser = {
   address?: string | null;
   joiningDate?: string | null;
   roles: string[];
+  /** Main company manager (registered with email). Can deactivate other desk logins. */
+  isOwner?: boolean;
   tenant: { id: number; name: string; slug: string };
   liveLocationEnabled: boolean;
   currency: string;
@@ -39,7 +41,10 @@ export type TeamPerson = {
   joiningDate: string | null;
   status: string;
   roles: string[];
+  isOwner?: boolean;
 };
+
+export type LeadBeatRef = { id: number; name: string; hq: string | null };
 
 export type Lead = {
   id: number;
@@ -65,6 +70,8 @@ export type Lead = {
   assigneeName: string | null;
   customerId: number | null;
   createdAt: string;
+  /** Permanent beats this shop belongs to (name + HQ). */
+  beats?: LeadBeatRef[];
   nextFollowUp: { id: number; type: string; dueAt: string; notes: string | null } | null;
   lastVisit?: { id: number; status: string; outcome: string | null; checkedInAt: string } | null;
   followUps?: FollowUp[];

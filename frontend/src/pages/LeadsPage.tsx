@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type ClipboardEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ExecFilter, useExecutives, type ExecValue } from "../components/ExecFilter";
 import { MapView } from "../components/MapView";
@@ -20,6 +20,7 @@ type Lead = {
   city: string | null;
   latitude: number | null;
   longitude: number | null;
+  beats?: { id: number; name: string; hq: string | null }[];
 };
 
 function execFromQuery(raw: string | null): ExecValue {
@@ -79,9 +80,9 @@ export function LeadsPage() {
     setAssigneeId("");
   }
 
-  async function findAddress() {
+  async function findAddress(override?: string) {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ").trim();
+    const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
     if (query.length < 3) {
       setError("Type the shop address, or paste a Google Maps link.");
       return;
@@ -90,7 +91,7 @@ export function LeadsPage() {
     const local = parseMapsLink(query);
     if (local) {
       setPin({ lat: local.lat, lng: local.lng });
-      setNotice("Pin set from the map link. Check it on the map, then save.");
+      setNotice("Pin moved to the Google Maps link. Save the lead when ready.");
       return;
     }
     try {
@@ -100,16 +101,28 @@ export function LeadsPage() {
       if (!hits.length) {
         setError(
           looksLikeMapsLink(query)
-            ? "Could not read that Google Maps link. Paste the full link from the browser, or click the map."
+            ? "Could not read that Google Maps link. Open it in Chrome, copy the long URL from the address bar, or click the map."
             : "Could not find that address. Click the map to drop a pin.",
         );
         return;
       }
       setPin({ lat: hits[0].lat, lng: hits[0].lng });
-      setNotice("Check the pin is on the shop. Click the map to move it.");
+      setNotice(
+        looksLikeMapsLink(query)
+          ? "Pin moved to the Google Maps link. Save the lead when ready."
+          : "Check the pin is on the shop. Click the map to move it.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not find that address.");
     }
+  }
+
+  function onAddressPaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pasted = event.clipboardData.getData("text").trim();
+    if (!looksLikeMapsLink(pasted)) return;
+    event.preventDefault();
+    setAddress(pasted);
+    void findAddress(pasted);
   }
 
   function useMyLocation() {
@@ -282,7 +295,8 @@ export function LeadsPage() {
               <input
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="Street, area — or paste Google Maps link"
+                onPaste={onAddressPaste}
+                placeholder="Paste maps.app.goo.gl link — pin updates automatically"
               />
             </label>
             <label>
@@ -291,7 +305,7 @@ export function LeadsPage() {
             </label>
           </div>
           <div className="toolbar">
-            <button className="btn blue" type="button" onClick={findAddress}>
+            <button className="btn blue" type="button" onClick={() => findAddress()}>
               Find address / map link
             </button>
             <button className="link" type="button" onClick={useMyLocation}>
@@ -320,12 +334,19 @@ export function LeadsPage() {
         {leads.map((lead) => {
           const place = [lead.address, lead.city].filter(Boolean).join(", ");
           const hasPin = lead.latitude != null && lead.longitude != null;
+          const beatLine =
+            lead.beats?.length
+              ? lead.beats.map((b) => `${b.name}${b.hq ? ` · HQ ${b.hq}` : ""}`).join(" · ")
+              : "No beat";
           return (
             <article key={lead.id} className="card person">
               <div>
                 <strong>
                   <Link to={`/leads/${lead.id}`}>{lead.name}</Link>
                 </strong>
+                <div className="muted">
+                  {beatLine}
+                </div>
                 <div className="muted">
                   {lead.phone} · {place || "No address"} · {lead.assigneeName || "Unassigned"}
                   {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
 import {
@@ -22,6 +22,30 @@ import { leadIsOpen, money, openCall, openNavigate, openWhatsApp, tempColor } fr
 import { leadStage, sortByStage, stageColors, type LeadStage, type StageBucket } from "@/lib/lead-stage";
 import { isSales } from "@/lib/roles";
 import { colors, radius, shadow } from "@/lib/theme";
+
+type HqFilter = "all" | "none" | string;
+type BeatFilter = "all" | "none" | number;
+
+function leadBeatLine(lead: Lead) {
+  const beats = lead.beats ?? [];
+  if (!beats.length) return "No beat · No HQ";
+  return beats.map((b) => `${b.name}${b.hq ? ` · HQ ${b.hq}` : " · No HQ"}`).join(" · ");
+}
+
+function matchesBeatFilters(lead: Lead, hqFilter: HqFilter, beatFilter: BeatFilter) {
+  const beats = lead.beats ?? [];
+  if (hqFilter === "none" && beatFilter === "none") return beats.length === 0;
+  if (hqFilter === "none") return beats.length === 0 || beats.every((b) => !b.hq);
+  if (beatFilter === "none") return beats.length === 0;
+  if (hqFilter !== "all") {
+    const onHq = beats.some((b) => (b.hq ?? "").toLowerCase() === hqFilter.toLowerCase());
+    if (!onHq) return false;
+  }
+  if (beatFilter !== "all") {
+    return beats.some((b) => b.id === beatFilter);
+  }
+  return true;
+}
 
 const filters = [
   { id: "all", label: "All" },
@@ -65,6 +89,8 @@ export default function LeadsScreen() {
   const [filter, setFilter] = useState(params.filter === "pending" ? "pending" : "all");
   const [tab, setTab] = useState<StageBucket>(params.filter === "pending" ? "waiting" : "todo");
   const [exec, setExec] = useState<ExecValue>(execFromParam(params.assigneeId));
+  const [hqFilter, setHqFilter] = useState<HqFilter>("all");
+  const [beatFilter, setBeatFilter] = useState<BeatFilter>("all");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,10 +134,39 @@ export default function LeadsScreen() {
     }, [load]),
   );
 
+  const hqOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const lead of leads) {
+      for (const beat of lead.beats ?? []) {
+        const hq = beat.hq?.trim();
+        if (!hq) continue;
+        const key = hq.toLowerCase();
+        if (!map.has(key)) map.set(key, hq);
+      }
+    }
+    return [...map.values()].sort((a, b) => a.localeCompare(b));
+  }, [leads]);
+
+  const beatOptions = useMemo(() => {
+    const map = new Map<number, { id: number; name: string; hq: string | null }>();
+    for (const lead of leads) {
+      for (const beat of lead.beats ?? []) {
+        if (hqFilter !== "all" && hqFilter !== "none") {
+          if ((beat.hq ?? "").toLowerCase() !== hqFilter.toLowerCase()) continue;
+        }
+        if (hqFilter === "none" && beat.hq) continue;
+        if (!map.has(beat.id)) map.set(beat.id, beat);
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [leads, hqFilter]);
+
   const rows = useMemo<Row[]>(() => {
     const now = new Date();
-    return leads.map((lead) => ({ lead, stage: leadStage(lead, now) }));
-  }, [leads]);
+    return leads
+      .filter((lead) => matchesBeatFilters(lead, hqFilter, beatFilter))
+      .map((lead) => ({ lead, stage: leadStage(lead, now) }));
+  }, [leads, hqFilter, beatFilter]);
 
   const counts = useMemo(() => {
     const out: Record<StageBucket, number> = { todo: 0, later: 0, done: 0, waiting: 0 };
@@ -150,7 +205,11 @@ export default function LeadsScreen() {
       router.push(`/visit/${row.lead.lastVisit.id}`);
       return;
     }
-    router.push({ pathname: "/visit/check-in", params: { leadId: String(row.lead.id) } });
+    // New visits only from today’s beat (same rule as desk / Beat tab).
+    Alert.alert("Use today’s beat", "Start a new visit from the Beat tab — only shops on today’s assigned beat.", [
+      { text: "Open Beat", onPress: () => router.push("/visits") },
+      { text: "Cancel", style: "cancel" },
+    ]);
   }
 
   return (
@@ -190,6 +249,47 @@ export default function LeadsScreen() {
           </Pressable>
         ) : null}
         <SearchBox placeholder="Search name or phone" value={q} onChangeText={setQ} onSubmit={load} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+          <Chip
+            label="All HQ"
+            on={hqFilter === "all"}
+            onPress={() => {
+              setHqFilter("all");
+              setBeatFilter("all");
+            }}
+          />
+          {hqOptions.map((hq) => (
+            <Chip
+              key={hq}
+              label={`HQ ${hq}`}
+              on={hqFilter.toLowerCase() === hq.toLowerCase()}
+              onPress={() => {
+                setHqFilter(hq);
+                setBeatFilter("all");
+              }}
+            />
+          ))}
+          <Chip
+            label="No HQ"
+            on={hqFilter === "none"}
+            onPress={() => {
+              setHqFilter("none");
+              setBeatFilter("all");
+            }}
+          />
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+          <Chip label="All beats" on={beatFilter === "all"} onPress={() => setBeatFilter("all")} />
+          {beatOptions.map((beat) => (
+            <Chip
+              key={beat.id}
+              label={beat.name}
+              on={beatFilter === beat.id}
+              onPress={() => setBeatFilter(beat.id)}
+            />
+          ))}
+          <Chip label="No beat" on={beatFilter === "none"} onPress={() => setBeatFilter("none")} />
+        </ScrollView>
         {sales ? (
           <>
             {!searching ? (
@@ -284,6 +384,9 @@ export default function LeadsScreen() {
                       </View>
                     </View>
                   </View>
+                  <Text style={styles.beatLine} numberOfLines={2}>
+                    {leadBeatLine(lead)}
+                  </Text>
                   <Text style={styles.meta} numberOfLines={2}>
                     {[
                       lead.productInterest || lead.businessType,
@@ -300,9 +403,9 @@ export default function LeadsScreen() {
                 </Pressable>
                 {sales && stage.canVisit ? (
                   <Button
-                    title={inProgress ? "Finish visit" : "Visit this shop"}
+                    title={inProgress ? "Finish visit" : "Open today’s beat"}
                     tone="green"
-                    icon={inProgress ? "time-outline" : "navigate-outline"}
+                    icon={inProgress ? "time-outline" : "map-outline"}
                     onPress={() => startVisit(row)}
                   />
                 ) : null}
@@ -441,6 +544,8 @@ const styles = StyleSheet.create({
   },
   pendingText: { flex: 1, color: colors.text, fontWeight: "700", fontSize: 13 },
   filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  filterChips: { gap: 8, paddingVertical: 2, paddingRight: 8 },
+  beatLine: { color: colors.blue, fontWeight: "700", fontSize: 13 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   name: { fontSize: 17, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
   meta: { color: colors.muted, flexShrink: 1 },

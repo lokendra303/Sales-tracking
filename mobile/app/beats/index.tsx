@@ -1,13 +1,15 @@
 import { useCallback, useMemo, useState } from "react";
 import { router, useFocusEffect, type Href } from "expo-router";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
-import { Button, Card, EmptyState, Field, Screen, ScreenHeader } from "@/components/ui";
+import { Button, Card, Chip, EmptyState, Field, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type PermanentBeat } from "@/lib/api";
 import { isManager } from "@/lib/roles";
 import { colors, radius, shadow, typo } from "@/lib/theme";
+
+type HqFilter = "all" | "none" | string;
 
 export default function BeatsScreen() {
   const { accessToken, user } = useAuth();
@@ -18,6 +20,7 @@ export default function BeatsScreen() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [territory, setTerritory] = useState("");
+  const [hqFilter, setHqFilter] = useState<HqFilter>("all");
   const [assigneeId, setAssigneeId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -39,15 +42,35 @@ export default function BeatsScreen() {
     }, [load]),
   );
 
+  const hqOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const beat of beats) {
+      const raw = beat.territory?.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (!map.has(key)) map.set(key, raw);
+    }
+    return [...map.values()].sort((a, b) => a.localeCompare(b));
+  }, [beats]);
+
+  const filteredBeats = useMemo(() => {
+    return beats.filter((beat) => {
+      const hq = beat.territory?.trim() ?? "";
+      if (hqFilter === "all") return true;
+      if (hqFilter === "none") return !hq;
+      return hq.toLowerCase() === hqFilter.toLowerCase();
+    });
+  }, [beats, hqFilter]);
+
   const grouped = useMemo(() => {
     const map = new Map<number, PermanentBeat[]>();
-    for (const beat of beats) {
+    for (const beat of filteredBeats) {
       const list = map.get(beat.assigneeId) ?? [];
       list.push(beat);
       map.set(beat.assigneeId, list);
     }
     return map;
-  }, [beats]);
+  }, [filteredBeats]);
 
   async function create() {
     if (!accessToken || !assigneeId || name.trim().length < 2) {
@@ -105,11 +128,21 @@ export default function BeatsScreen() {
           <Text style={styles.section}>New beat (group)</Text>
           <Text style={typo.muted}>Like the portal: name the route, pick who owns it, then add shops.</Text>
           <Field label="Beat name" value={name} onChangeText={setName} placeholder="North Zone / Sector 12" />
-          <Field label="Area (optional)" value={territory} onChangeText={setTerritory} placeholder="Territory label" />
+          <Field label="HQ (optional)" value={territory} onChangeText={setTerritory} placeholder="e.g. NDL, PUNE 1" />
           <Text style={styles.label}>Assigned executive</Text>
           <ExecPicker people={people} value={assigneeId} onChange={setAssigneeId} />
           <Button title={busy ? "Saving…" : "Create beat"} tone="green" onPress={create} disabled={busy} />
         </Card>
+      ) : null}
+
+      {beats.length ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip label="All HQ" on={hqFilter === "all"} onPress={() => setHqFilter("all")} />
+          {hqOptions.map((hq) => (
+            <Chip key={hq} label={hq} on={hqFilter.toLowerCase() === hq.toLowerCase()} onPress={() => setHqFilter(hq)} />
+          ))}
+          <Chip label="No HQ" on={hqFilter === "none"} onPress={() => setHqFilter("none")} />
+        </ScrollView>
       ) : null}
 
       {loading ? <ActivityIndicator color={colors.blue} /> : null}
@@ -118,13 +151,23 @@ export default function BeatsScreen() {
         <EmptyState icon="map-outline" text="No beats yet. Create one, add multiple leads, then put it on the schedule." />
       ) : null}
 
+      {!loading && beats.length && !filteredBeats.length ? (
+        <EmptyState
+          icon="filter-outline"
+          text={`No beats for ${hqFilter === "none" ? "No HQ" : hqFilter}. Try another HQ filter.`}
+        />
+      ) : null}
+
       {people.map((person) => {
         const list = grouped.get(person.id) ?? [];
         if (!list.length && !creating) return null;
         return (
           <View key={person.id} style={styles.group}>
             <Text style={styles.groupTitle}>{person.name}</Text>
-            <Text style={typo.muted}>{list.length} beat{list.length === 1 ? "" : "s"}</Text>
+            <Text style={typo.muted}>
+              {list.length} beat{list.length === 1 ? "" : "s"}
+              {hqFilter !== "all" ? ` · ${hqFilter === "none" ? "No HQ" : hqFilter}` : ""}
+            </Text>
             {list.map((beat) => (
               <Pressable
                 key={beat.id}
@@ -133,7 +176,7 @@ export default function BeatsScreen() {
               >
                 <View style={{ flex: 1, gap: 4 }}>
                   <Text style={styles.name}>{beat.name}</Text>
-                  {beat.territory ? <Text style={typo.muted}>{beat.territory}</Text> : null}
+                  <Text style={typo.muted}>{beat.territory?.trim() || "No HQ"}</Text>
                   <Text style={styles.meta}>
                     {beat.size} lead{beat.size === 1 ? "" : "s"} · tap to add more
                   </Text>
@@ -157,6 +200,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  chips: { gap: 8, paddingVertical: 4, paddingRight: 8 },
   section: { fontSize: 17, fontWeight: "700", color: colors.ink },
   label: { ...typo.muted, marginTop: 8, marginBottom: 4 },
   group: { gap: 8, marginBottom: 8 },

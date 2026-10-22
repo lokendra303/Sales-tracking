@@ -23,7 +23,20 @@ function codesMatch(storedHash: string, given: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-function publicUser(user: {
+/** Main company account = earliest manager (email registration). */
+async function resolveIsOwner(tenantId: number, userId: number) {
+  const owner = await prisma.user.findFirst({
+    where: {
+      tenantId,
+      roles: { some: { role: { code: "MANAGER" } } },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return owner?.id === userId;
+}
+
+async function publicUser(user: {
   id: number;
   tenantId: number;
   name: string;
@@ -40,6 +53,7 @@ function publicUser(user: {
   tenant: { id: number; name: string; slug: string; status?: string; settings: { liveLocationEnabled: boolean; currency: string; timezone: string } | null };
 }) {
   const roles = user.roles.map((item) => item.role.code);
+  const isOwner = roles.includes("MANAGER") ? await resolveIsOwner(user.tenantId, user.id) : false;
   return {
     id: user.id,
     name: user.name,
@@ -52,6 +66,7 @@ function publicUser(user: {
     joiningDate: user.joiningDate ?? null,
     status: user.status,
     roles,
+    isOwner,
     tenant: {
       id: user.tenant.id,
       name: user.tenant.name,
@@ -158,7 +173,7 @@ export async function login(input: {
   }
 
   const tokens = await issueTokens(user.id, user.tenantId, roles, deviceId);
-  return { user: publicUser(user), ...tokens };
+  return { user: await publicUser(user), ...tokens };
 }
 
 export async function refresh(refreshToken: string) {
@@ -189,7 +204,7 @@ export async function refresh(refreshToken: string) {
 
   const roles = stored.user.roles.map((item) => item.role.code);
   const tokens = await issueTokens(stored.user.id, stored.user.tenantId, roles, stored.deviceId ?? undefined);
-  return { user: publicUser(stored.user), ...tokens };
+  return { user: await publicUser(stored.user), ...tokens };
 }
 
 export async function logout(refreshToken?: string) {
@@ -217,7 +232,7 @@ export async function me(userId: number) {
   if (!user) {
     throw unauthorized();
   }
-  return publicUser(user);
+  return await publicUser(user);
 }
 
 export async function savePushToken(userId: number, token: string, deviceUid = "salestrack-dev") {
@@ -613,5 +628,5 @@ export async function updateOwnProfile(
     },
     include: userInclude,
   });
-  return publicUser(updated);
+  return await publicUser(updated);
 }

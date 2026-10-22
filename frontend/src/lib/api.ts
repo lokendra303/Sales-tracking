@@ -29,6 +29,8 @@ export type ApiUser = {
   address?: string | null;
   joiningDate?: string | null;
   roles: string[];
+  /** Main company manager (registered with email). Can deactivate other desk logins. */
+  isOwner?: boolean;
   tenant: { id: number; name: string; slug: string };
   liveLocationEnabled: boolean;
   currency: string;

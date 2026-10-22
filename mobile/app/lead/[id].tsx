@@ -12,7 +12,7 @@ import { bestFix, loadLocation } from "@/lib/device-location";
 import { useReminders } from "@/lib/reminders-context";
 import { leadIsOpen, leadStateLabel, money, openCall, openMapPin, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
 import { looksLikeMapsLink, parseMapsLink } from "@/lib/maps-link";
-import { isManager, isSales } from "@/lib/roles";
+import { isOffice, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
 export default function LeadDetailScreen() {
@@ -21,7 +21,7 @@ export default function LeadDetailScreen() {
   const reminders = useReminders();
   const [lead, setLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(true);
-  const office = isManager(user?.roles);
+  const office = isOffice(user?.roles);
   const sales = isSales(user?.roles);
   const { people } = useExecutives();
   const [assigning, setAssigning] = useState(false);
@@ -154,18 +154,18 @@ export default function LeadDetailScreen() {
     }
   }
 
-  async function findAddress() {
+  async function findAddress(override?: string, quiet = false) {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ").trim();
+    const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
     if (query.length < 3) {
-      Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
+      if (!quiet) Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
       return;
     }
     const local = parseMapsLink(query);
     if (local) {
       setPin({ lat: local.lat, lng: local.lng });
       setMatches([{ lat: local.lat, lng: local.lng, label: local.label }]);
-      Alert.alert("Pin set", "From the map link. Tap Save location to keep it.");
+      if (!quiet) Alert.alert("Pin set", "From the map link. Tap Save location to keep it.");
       return;
     }
     setLocating(true);
@@ -175,15 +175,22 @@ export default function LeadDetailScreen() {
       });
       setMatches(hits);
       if (!hits.length) {
-        Alert.alert(
-          "No match",
-          looksLikeMapsLink(query)
-            ? "Could not read that Google Maps link. Paste the full link from the browser, or use GPS at the shop."
-            : "Stand at the shop and tap Use my GPS here.",
-        );
-      } else setPin({ lat: hits[0].lat, lng: hits[0].lng });
+        if (!quiet) {
+          Alert.alert(
+            "No match",
+            looksLikeMapsLink(query)
+              ? "Could not read that Google Maps link. Paste the full link from the browser, or use GPS at the shop."
+              : "Stand at the shop and tap Use my GPS here.",
+          );
+        }
+      } else {
+        setPin({ lat: hits[0]!.lat, lng: hits[0]!.lng });
+        if (!quiet && looksLikeMapsLink(query)) {
+          Alert.alert("Pin set", "From the map link. Tap Save location to keep it.");
+        }
+      }
     } catch (err) {
-      Alert.alert("Could not search", err instanceof Error ? err.message : "Try again.");
+      if (!quiet) Alert.alert("Could not search", err instanceof Error ? err.message : "Try again.");
     } finally {
       setLocating(false);
     }
@@ -270,6 +277,11 @@ export default function LeadDetailScreen() {
         <Text style={typo.muted}>{lead.contactPerson || "No contact person"}</Text>
         <Text style={typo.body}>{lead.phone}</Text>
         <Text style={typo.muted}>{[lead.address, lead.city].filter(Boolean).join(", ") || "No address"}</Text>
+        <Text style={styles.beatLine}>
+          {(lead.beats ?? []).length
+            ? (lead.beats ?? []).map((b) => `${b.name}${b.hq ? ` · HQ ${b.hq}` : " · No HQ"}`).join(" · ")
+            : "No beat · No HQ"}
+        </Text>
         {lead.latitude != null && lead.longitude != null ? (
           <Text style={typo.muted}>
             Map pin {lead.latitude.toFixed(5)}, {lead.longitude.toFixed(5)}
@@ -343,9 +355,14 @@ export default function LeadDetailScreen() {
       ) : null}
       {sales && leadIsOpen(lead) ? (
         <Button
-          title="Start visit"
+          title="Open today’s beat"
           tone="green"
-          onPress={() => router.push({ pathname: "/visit/check-in", params: { leadId: String(lead.id) } })}
+          onPress={() =>
+            Alert.alert("Use today’s beat", "Start visits from the Beat tab — only shops on today’s assigned beat.", [
+              { text: "Open Beat", onPress: () => router.push("/visits") },
+              { text: "Cancel", style: "cancel" },
+            ])
+          }
         />
       ) : null}
 
@@ -414,12 +431,19 @@ export default function LeadDetailScreen() {
               <Field
                 label="Address or Google Maps link"
                 value={address}
-                onChangeText={setAddress}
-                placeholder="Street, area — or paste Maps link"
+                onChangeText={(text) => {
+                  setAddress(text);
+                  if (looksLikeMapsLink(text.trim())) void findAddress(text.trim(), true);
+                }}
+                placeholder="Paste maps.app.goo.gl link — pin updates"
               />
               <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
+              <Text style={typo.muted}>
+                Paste a Google Maps link to move the pin. “Use my GPS” is only your live location — don’t use it after
+                pasting a shop link.
+              </Text>
               <ActionRow>
-                <Button title="Find address / link" tone="outline" flex onPress={findAddress} disabled={locating} />
+                <Button title="Find address / link" tone="outline" flex onPress={() => findAddress()} disabled={locating} />
                 <Button title="Use my GPS here" tone="outline" flex onPress={pinHere} disabled={locating} />
               </ActionRow>
               {matches.length > 1
@@ -513,6 +537,7 @@ const styles = StyleSheet.create({
   stageText: { fontWeight: "800", fontSize: 14, flexShrink: 1 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   name: { fontSize: 22, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
+  beatLine: { color: colors.blue, fontWeight: "700", fontSize: 14, marginTop: 2 },
   section: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 8 },
   followTitle: { fontWeight: "800", color: colors.text },
   link: { color: colors.blue, fontWeight: "800" },

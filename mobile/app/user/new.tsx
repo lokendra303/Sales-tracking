@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useLocalSearchParams } from "expo-router";
 import { goBack } from "@/lib/nav";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Button, Field, PasswordField, Screen, ScreenHeader } from "@/components/ui";
@@ -12,17 +13,24 @@ type AccountKind = "SALES_EXECUTIVE" | "MANAGER";
 export default function NewUserScreen() {
   const { accessToken, user } = useAuth();
   const admin = isAdmin(user?.roles);
-  const [role, setRole] = useState<AccountKind>("SALES_EXECUTIVE");
+  const params = useLocalSearchParams<{ kind?: string }>();
+  const startAsDesk = params.kind === "desk" || params.kind === "manager";
+  const [role, setRole] = useState<AccountKind>(startAsDesk ? "MANAGER" : "SALES_EXECUTIVE");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [employeeId, setEmployeeId] = useState("");
-  const [designation, setDesignation] = useState("Sales Executive");
+  const [designation, setDesignation] = useState(startAsDesk ? "Desk assistant" : "Sales Executive");
   const [city, setCity] = useState("");
   const [address, setAddress] = useState("");
   const [joiningDate, setJoiningDate] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const title = useMemo(() => {
+    if (admin) return "Add manager";
+    return role === "MANAGER" ? "Add desk login" : "Add field employee";
+  }, [admin, role]);
 
   function pickRole(next: AccountKind) {
     setRole(next);
@@ -78,18 +86,29 @@ export default function NewUserScreen() {
       );
       goBack("/team");
     } catch (err) {
-      Alert.alert("Could not save", err instanceof Error ? err.message : "Try again.");
+      const message = err instanceof Error ? err.message : "Try again.";
+      const needsApi =
+        /only add sales executives|Managers can only add/i.test(message) ||
+        /forbidden/i.test(message);
+      Alert.alert(
+        "Could not save",
+        needsApi
+          ? `${message}\n\nThe live API may be old. Redeploy the backend so desk logins work.`
+          : message,
+      );
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <Screen keyboard header={<ScreenHeader title={admin ? "Add manager" : "Add person"} back align="center" fallback="/team" />}>
+    <Screen keyboard header={<ScreenHeader title={title} back align="center" fallback="/team" />}>
       <Text style={typo.muted}>
         {admin
           ? "System admins approve manager registrations on the desk. They do not add employees here."
-          : "Add a field executive for the phone app, or a desk login so someone else can run the portal with their own credentials."}
+          : role === "MANAGER"
+            ? "Create another login for the same company desk. They get their own mobile + password — never share yours."
+            : "Add a field executive for the phone app, or switch to Desk login for another portal user."}
       </Text>
       {admin ? null : (
         <>
@@ -98,13 +117,20 @@ export default function NewUserScreen() {
             <Pressable
               style={[styles.kindChip, role === "SALES_EXECUTIVE" && styles.kindOn]}
               onPress={() => pickRole("SALES_EXECUTIVE")}
+              accessibilityRole="button"
+              accessibilityState={{ selected: role === "SALES_EXECUTIVE" }}
             >
               <Text style={[styles.kindTitle, role === "SALES_EXECUTIVE" && styles.kindTitleOn]}>Field</Text>
               <Text style={styles.kindHint}>Phone app only</Text>
             </Pressable>
-            <Pressable style={[styles.kindChip, role === "MANAGER" && styles.kindOn]} onPress={() => pickRole("MANAGER")}>
+            <Pressable
+              style={[styles.kindChip, role === "MANAGER" && styles.kindOn]}
+              onPress={() => pickRole("MANAGER")}
+              accessibilityRole="button"
+              accessibilityState={{ selected: role === "MANAGER" }}
+            >
               <Text style={[styles.kindTitle, role === "MANAGER" && styles.kindTitleOn]}>Desk login</Text>
-              <Text style={styles.kindHint}>Web portal + app</Text>
+              <Text style={styles.kindHint}>Same portal, own password</Text>
             </Pressable>
           </View>
           <Field label="Full name *" value={name} onChangeText={setName} placeholder="Full name" autoCapitalize="words" />

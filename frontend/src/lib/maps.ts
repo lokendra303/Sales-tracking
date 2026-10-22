@@ -16,14 +16,25 @@ function pairHit(a: string, b: string, label?: string): MapsPin | null {
 
 /** Sync parse of Google/Apple/geo links or plain "lat, lng" (no short-link expand). */
 export function parseMapsLink(raw: string): MapsPin | null {
-  const text = raw.trim();
+  let text = raw.trim();
   if (!text) return null;
+  try {
+    text = decodeURIComponent(text.replace(/\+/g, "%2B"));
+  } catch {
+    // keep raw
+  }
 
-  const plain = text.match(/^(-?\d+(?:[.,]\d+)?)\s*[,/\s]\s*(-?\d+(?:[.,]\d+)?)$/);
+  const plain = text.match(/^(-?\d+(?:[.,]\d+)?)\s*[,/\s]\s*\+?(-?\d+(?:[.,]\d+)?)$/);
   if (plain) return pairHit(plain[1], plain[2]);
 
-  const at = text.match(/@(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)/);
+  const at = text.match(/@(-?\d+(?:[.,]\d+)?)\s*,\s*\+?(-?\d+(?:[.,]\d+)?)/);
   if (at) return pairHit(at[1], at[2]);
+
+  // Expanded short links: /maps/search/28.457763,+77.460228
+  const pathCoords = text.match(
+    /\/maps\/(?:search|dir)\/(-?\d+(?:[.,]\d+)?)\s*,\s*\+?(-?\d+(?:[.,]\d+)?)/i,
+  );
+  if (pathCoords) return pairHit(pathCoords[1], pathCoords[2]);
 
   const threed = [...text.matchAll(/!3d(-?\d+(?:[.,]\d+)?)!4d(-?\d+(?:[.,]\d+)?)/g)];
   if (threed.length) {
@@ -32,7 +43,7 @@ export function parseMapsLink(raw: string): MapsPin | null {
     if (hit) return hit;
   }
 
-  const geo = text.match(/geo:(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)/i);
+  const geo = text.match(/geo:(-?\d+(?:[.,]\d+)?)\s*,\s*\+?(-?\d+(?:[.,]\d+)?)/i);
   if (geo) return pairHit(geo[1], geo[2]);
 
   try {
@@ -41,7 +52,7 @@ export function parseMapsLink(raw: string): MapsPin | null {
       for (const key of ["q", "query", "destination", "daddr", "sll", "ll", "center"]) {
         const v = u.searchParams.get(key);
         if (!v) continue;
-        const coords = v.match(/(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)/);
+        const coords = v.match(/(-?\d+(?:[.,]\d+)?)\s*,\s*\+?(-?\d+(?:[.,]\d+)?)/);
         if (coords) {
           const hit = pairHit(coords[1], coords[2]);
           if (hit) return hit;
@@ -52,7 +63,7 @@ export function parseMapsLink(raw: string): MapsPin | null {
     // ignore
   }
 
-  const loose = text.match(/(?:^|[^\d.-])(-?\d{1,2}[.,]\d{3,})\s*,\s*(-?\d{1,3}[.,]\d{3,})(?:[^\d.]|$)/);
+  const loose = text.match(/(?:^|[^\d.-])(-?\d{1,2}[.,]\d{3,})\s*,\s*\+?(-?\d{1,3}[.,]\d{3,})(?:[^\d.]|$)/);
   if (loose) return pairHit(loose[1], loose[2]);
 
   return null;

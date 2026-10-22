@@ -146,14 +146,12 @@ export default function VisitsScreen() {
                     <Text style={styles.heroTitle} numberOfLines={2}>
                       {beat.beatName || "No beat assigned"}
                     </Text>
-                    {beat.territory ? (
-                      <View style={styles.territoryRow}>
-                        <Ionicons name="map-outline" size={14} color="#BFDBFE" />
-                        <Text style={styles.territory} numberOfLines={1}>
-                          {beat.territory}
-                        </Text>
-                      </View>
-                    ) : null}
+                    <View style={styles.territoryRow}>
+                      <Ionicons name="business-outline" size={14} color="#BFDBFE" />
+                      <Text style={styles.territory} numberOfLines={1}>
+                        HQ · {beat.territory?.trim() || "Not set"}
+                      </Text>
+                    </View>
                   </View>
                   <ProgressRing
                     percent={coverage.percent}

@@ -9,6 +9,7 @@ import { ActionRow, Button, Chip, Field, Screen, ScreenHeader } from "@/componen
 import { colors, radius } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
 import { ApiError, api, isOfflineError } from "@/lib/api";
+import { looksLikeMapsLink, parseMapsLink } from "@/lib/maps-link";
 import { requestId, useOffline } from "@/lib/offline";
 
 export default function NewLeadScreen() {
@@ -145,7 +146,32 @@ export default function NewLeadScreen() {
         onChangeText={setProductInterest}
         placeholder="What they may buy"
       />
-      <Field label="Address" value={address} onChangeText={setAddress} placeholder="Street, area" />
+      <Field
+        label="Address or Google Maps link"
+        value={address}
+        onChangeText={(text) => {
+          setAddress(text);
+          const trimmed = text.trim();
+          if (!looksLikeMapsLink(trimmed)) return;
+          const local = parseMapsLink(trimmed);
+          if (local) {
+            setPin({ lat: local.lat, lng: local.lng });
+            setPinLabel("From Google Maps link");
+            return;
+          }
+          if (!accessToken) return;
+          api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(trimmed)}`, {
+            token: accessToken,
+          })
+            .then((hits) => {
+              if (!hits[0]) return;
+              setPin({ lat: hits[0].lat, lng: hits[0].lng });
+              setPinLabel(hits[0].label || "From Google Maps link");
+            })
+            .catch(() => undefined);
+        }}
+        placeholder="Street, area — or paste Maps link"
+      />
       <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
       <View style={styles.field}>
         <Text style={styles.label}>Shop location</Text>
@@ -162,7 +188,7 @@ export default function NewLeadScreen() {
             </View>
           </View>
         ) : (
-          <Text style={styles.hint}>Pick the shop on the map, or stand at the shop and use your GPS.</Text>
+          <Text style={styles.hint}>Paste a Maps link above, pick on the map, or use GPS at the shop.</Text>
         )}
         <ActionRow>
           <Button title={pin ? "Change on map" : "Pick on map"} icon="map-outline" onPress={() => setMapOpen(true)} flex />

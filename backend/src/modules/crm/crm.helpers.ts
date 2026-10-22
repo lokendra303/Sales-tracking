@@ -50,11 +50,23 @@ export function publicLead(lead: {
   createdBy?: { id: number; name: string } | null;
   followUps?: { id: number; type: string; dueAt: Date; doneAt: Date | null; notes: string | null }[];
   visits?: { id: number; status: string; outcome: string | null; checkedInAt: Date }[];
+  beatMembers?: {
+    beat: { id: number; name: string; territory: string | null; active: boolean } | null;
+  }[];
 }) {
   const lastVisit = lead.visits?.[0];
   const nextFollowUp = lead.followUps
     ?.filter((item) => !item.doneAt)
     .sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime())[0];
+
+  const beats = (lead.beatMembers ?? [])
+    .map((row) => row.beat)
+    .filter((beat): beat is { id: number; name: string; territory: string | null; active: boolean } => Boolean(beat?.active))
+    .map((beat) => ({
+      id: beat.id,
+      name: beat.name,
+      hq: beat.territory?.trim() || null,
+    }));
 
   return {
     id: lead.id,
@@ -80,6 +92,7 @@ export function publicLead(lead: {
     assigneeName: lead.assignee?.name ?? null,
     customerId: lead.customerId,
     createdAt: lead.createdAt,
+    beats,
     nextFollowUp: nextFollowUp
       ? { id: nextFollowUp.id, type: nextFollowUp.type, dueAt: nextFollowUp.dueAt, notes: nextFollowUp.notes }
       : null,

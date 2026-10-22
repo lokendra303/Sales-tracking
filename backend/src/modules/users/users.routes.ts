@@ -24,20 +24,37 @@ function defaultCreateRole(roles: RoleCode[]): RoleCode {
   return "SALES_EXECUTIVE";
 }
 
-function publicPerson(user: {
-  id: number;
-  name: string;
-  phone: string;
-  email: string | null;
-  employeeId: string | null;
-  designation: string | null;
-  city: string | null;
-  address: string | null;
-  joiningDate: Date | null;
-  status: string;
-  roles: { role: { code: RoleCode } }[];
-  teamMembers?: { team: { id: number; name: string } }[];
-}) {
+/** Main account = first manager created for the company (email registration). */
+async function tenantOwnerId(tenantId: number) {
+  const owner = await prisma.user.findFirst({
+    where: {
+      tenantId,
+      roles: { some: { role: { code: "MANAGER" } } },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return owner?.id ?? null;
+}
+
+function publicPerson(
+  user: {
+    id: number;
+    name: string;
+    phone: string;
+    email: string | null;
+    employeeId: string | null;
+    designation: string | null;
+    city: string | null;
+    address: string | null;
+    joiningDate: Date | null;
+    status: string;
+    roles: { role: { code: RoleCode } }[];
+    teamMembers?: { team: { id: number; name: string } }[];
+  },
+  ownerId: number | null,
+) {
+  const roles = user.roles.map((item) => item.role.code);
   return {
     id: user.id,
     name: user.name,
@@ -49,7 +66,8 @@ function publicPerson(user: {
     address: user.address,
     joiningDate: user.joiningDate,
     status: user.status,
-    roles: user.roles.map((item) => item.role.code),
+    roles,
+    isOwner: ownerId != null && user.id === ownerId,
     teams: (user.teamMembers ?? []).map((item) => ({ id: item.team.id, name: item.team.name })),
   };
 }
@@ -75,23 +93,27 @@ async function loadManaged(tenantId: number, actorRoles: RoleCode[], userId: num
 usersRouter.get(
   "/",
   asyncHandler(async (req, res) => {
+    const tenantId = req.auth!.tenantId;
+    const ownerId = await tenantOwnerId(tenantId);
     const users = await prisma.user.findMany({
       where: {
-        tenantId: req.auth!.tenantId,
+        tenantId,
         roles: { some: { role: { code: { in: managedRoles(req.auth!.roles) } } } },
       },
       include: personInclude,
       orderBy: { name: "asc" },
     });
-    res.json({ success: true, data: users.map(publicPerson) });
+    res.json({ success: true, data: users.map((row) => publicPerson(row, ownerId)) });
   }),
 );
 
 usersRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    const user = await loadManaged(req.auth!.tenantId, req.auth!.roles, Number(req.params.id));
-    res.json({ success: true, data: publicPerson(user) });
+    const tenantId = req.auth!.tenantId;
+    const ownerId = await tenantOwnerId(tenantId);
+    const user = await loadManaged(tenantId, req.auth!.roles, Number(req.params.id));
+    res.json({ success: true, data: publicPerson(user, ownerId) });
   }),
 );
 
@@ -161,7 +183,8 @@ usersRouter.post(
       include: personInclude,
     });
 
-    res.status(201).json({ success: true, data: publicPerson(user) });
+    const ownerId = await tenantOwnerId(tenantId);
+    res.status(201).json({ success: true, data: publicPerson(user, ownerId) });
   }),
 );
 
@@ -187,9 +210,25 @@ usersRouter.put(
     const body = updateUserSchema.parse(req.body);
     const current = await loadManaged(req.auth!.tenantId, req.auth!.roles, Number(req.params.id));
     const tenantId = req.auth!.tenantId;
+    const ownerId = await tenantOwnerId(tenantId);
+    const actorId = req.auth!.userId;
+    const targetIsManager = current.roles.some((row) => row.role.code === "MANAGER");
+    const actorIsOwner = ownerId != null && actorId === ownerId;
+    const targetIsOwner = ownerId != null && current.id === ownerId;
 
-    if (current.id === req.auth!.userId && body.status === "DISABLED") {
+    if (current.id === actorId && body.status === "DISABLED") {
       throw badRequest("You cannot turn off your own login.");
+    }
+
+    // Main registered manager can deactivate desk helpers / field staff.
+    // Desk helpers cannot turn off the main manager or other desk logins.
+    if (body.status === "DISABLED") {
+      if (targetIsOwner) {
+        throw forbidden("The main manager account (registered with email) cannot be turned off.");
+      }
+      if (targetIsManager && !actorIsOwner) {
+        throw forbidden("Only the main manager can turn off another desk login.");
+      }
     }
 
     if (body.phone && body.phone !== current.phone) {
@@ -235,6 +274,6 @@ usersRouter.put(
       include: personInclude,
     });
 
-    res.json({ success: true, data: publicPerson(updated) });
+    res.json({ success: true, data: publicPerson(updated, ownerId) });
   }),
 );
