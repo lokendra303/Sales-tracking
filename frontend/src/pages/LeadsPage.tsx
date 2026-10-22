@@ -4,6 +4,7 @@ import { ExecFilter, useExecutives, type ExecValue } from "../components/ExecFil
 import { MapView } from "../components/MapView";
 import { api, apiForm } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { mapsUrl } from "../lib/maps";
 import { mobileDigits } from "../lib/phone";
 
 type Lead = {
@@ -363,9 +364,14 @@ export function LeadsPage() {
                 {hasPin || place ? (
                   <a
                     href={
-                      hasPin
-                        ? `https://www.google.com/maps/dir/?api=1&destination=${lead.latitude},${lead.longitude}`
-                        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(place)}`
+                      mapsUrl({
+                        latitude: lead.latitude,
+                        longitude: lead.longitude,
+                        address: lead.address,
+                        city: lead.city,
+                        name: lead.name,
+                        mode: "dir",
+                      }) ?? undefined
                     }
                     target="_blank"
                     rel="noreferrer"

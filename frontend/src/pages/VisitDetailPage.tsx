@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, apiBlob } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { MapView } from "../components/MapView";
+import { mapsUrl } from "../lib/maps";
 import type { Visit } from "../lib/types";
 
 export function VisitDetailPage() {
@@ -81,7 +82,8 @@ export function VisitDetailPage() {
       : null,
   ].filter(Boolean) as { lat: number; lng: number; label: string; extra?: string }[];
 
-  const mapLink = (lat: number, lng: number) => `https://www.google.com/maps?q=${lat},${lng}`;
+  const mapLink = (lat: number, lng: number) =>
+    mapsUrl({ latitude: lat, longitude: lng, mode: "pin" }) ?? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
   const places = [
     {
       label: "Check-in",

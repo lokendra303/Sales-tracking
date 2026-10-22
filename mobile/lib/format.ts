@@ -1,4 +1,4 @@
-import { Linking } from "react-native";
+import { Linking, Platform } from "react-native";
 
 export function money(value: number | null | undefined) {
   if (value == null) return "—";
@@ -54,13 +54,73 @@ export async function openWhatsApp(phone: string) {
   await openUrl(waLink(phone));
 }
 
-export async function openNavigate(lat?: number | null, lng?: number | null, address?: string | null) {
-  if (lat != null && lng != null) {
-    await openUrl(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+function asCoord(value: number | string | null | undefined) {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Stable Google/Apple Maps URL that drops a pin on the GPS (not a vague address search). */
+export function mapsPinUrl(
+  lat?: number | string | null,
+  lng?: number | string | null,
+  label?: string | null,
+) {
+  const la = asCoord(lat);
+  const lo = asCoord(lng);
+  if (la != null && lo != null && Math.abs(la) <= 90 && Math.abs(lo) <= 180) {
+    // Exact lat,lng only — shop name in the query can make Maps snap to a wrong POI.
+    const pin = `${la.toFixed(7)},${lo.toFixed(7)}`;
+    if (Platform.OS === "ios") {
+      const q = encodeURIComponent(label?.trim() || pin);
+      return `https://maps.apple.com/?ll=${pin}&q=${q}`;
+    }
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pin)}`;
+  }
+  const place = label?.trim();
+  if (place) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
+  }
+  return null;
+}
+
+/** Open maps centered on the exact GPS pin (no turn-by-turn). */
+export async function openMapPin(
+  lat?: number | string | null,
+  lng?: number | string | null,
+  label?: string | null,
+) {
+  const url = mapsPinUrl(lat, lng, label);
+  if (url) await openUrl(url);
+}
+
+/** Open maps with turn-by-turn to the shop pin (or address if no GPS). */
+export async function openNavigate(
+  lat?: number | string | null,
+  lng?: number | string | null,
+  address?: string | null,
+) {
+  const la = asCoord(lat);
+  const lo = asCoord(lng);
+  if (la != null && lo != null && Math.abs(la) <= 90 && Math.abs(lo) <= 180) {
+    const pin = `${la.toFixed(7)},${lo.toFixed(7)}`;
+    if (Platform.OS === "android") {
+      // geo:lat,lng?q=lat,lng pins the exact GPS (label in q= can snap to a wrong place).
+      await openUrl(`geo:${pin}?q=${encodeURIComponent(pin)}`);
+      return;
+    }
+    if (Platform.OS === "ios") {
+      await openUrl(`https://maps.apple.com/?daddr=${pin}&dirflg=d`);
+      return;
+    }
+    await openUrl(
+      `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(pin)}&travelmode=driving`,
+    );
     return;
   }
-  if (address) {
-    await openUrl(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`);
+  const place = address?.trim();
+  if (place) {
+    await openUrl(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`);
   }
 }
 

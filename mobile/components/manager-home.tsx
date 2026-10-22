@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { ProgressRing } from "@/components/progress-charts";
@@ -184,15 +184,20 @@ export function ManagerHome({
       ) : null}
 
       <SectionTitle title="Quick actions" />
-      <View style={styles.actions}>
-        <ActionTile icon="navigate-outline" label="Live team" tone="green" onPress={() => router.push("/team")} />
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.actions}
+        style={styles.actionsScroll}
+      >
+        <ActionTile icon="navigate-outline" label={"Live\nteam"} tone="green" onPress={() => router.push("/team")} />
         <ActionTile icon="map-outline" label="Beats" tone="green" onPress={() => router.push("/beats")} />
-        <ActionTile icon="camera-outline" label="Visit proof" onPress={() => router.push("/visits")} />
+        <ActionTile icon="camera-outline" label={"Visit\nproof"} onPress={() => router.push("/visits")} />
         <ActionTile icon="briefcase-outline" label="Leads" tone="amber" onPress={() => router.push("/leads")} />
         <ActionTile icon="bar-chart-outline" label="Reports" tone="slate" onPress={() => router.push("/reports")} />
-        <ActionTile icon="add-circle-outline" label="Add lead" tone="amber" onPress={() => router.push("/lead/new")} />
-        <ActionTile icon="person-add-outline" label="Add employee" tone="green" onPress={() => router.push("/user/new")} />
-      </View>
+        <ActionTile icon="add-circle-outline" label={"Add\nlead"} tone="amber" onPress={() => router.push("/lead/new")} />
+        <ActionTile icon="person-add-outline" label={"Add\nemployee"} tone="green" onPress={() => router.push("/user/new")} />
+      </ScrollView>
 
       <SectionTitle title="Team right now" action="See all" onAction={() => router.push("/team")} />
       <Card style={styles.list}>
@@ -307,7 +312,8 @@ const styles = StyleSheet.create({
   heroStatValue: { color: "#fff", fontSize: 18, fontWeight: "800" },
   heroStatLabel: { color: "#BFDBFE", fontSize: 12, fontWeight: "600" },
   heroDivider: { width: StyleSheet.hairlineWidth, alignSelf: "stretch", backgroundColor: "rgba(255,255,255,0.2)", marginHorizontal: 16 },
-  actions: { flexDirection: "row", gap: 10 },
+  actionsScroll: { marginHorizontal: -4 },
+  actions: { flexDirection: "row", alignItems: "stretch", gap: 10, paddingHorizontal: 4, paddingBottom: 4 },
   list: { paddingVertical: 4, gap: 0 },
   person: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },

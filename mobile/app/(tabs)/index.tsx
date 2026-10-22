@@ -137,6 +137,11 @@ export default function HomeScreen() {
 
       {isSales(roles) ? (
         <Card>
+          <Text style={styles.cardTitle}>Your day (simple flow)</Text>
+          <Text style={typo.muted}>
+            1. Start field work → 2. Open Beat (today’s list) → 3. Check in shop by shop. Leads tab is your full pipeline —
+            not only today.
+          </Text>
           <View style={styles.row}>
             <Text style={styles.cardTitle}>Field work</Text>
             <Badge
@@ -150,7 +155,7 @@ export default function HomeScreen() {
               {field.session.liveStreaming ? ` · ${field.session.pointCount} GPS points` : ""}
             </Text>
           ) : (
-            <Text style={typo.muted}>Start your day, then visit today’s beat.</Text>
+            <Text style={typo.muted}>Turn on when you leave for the field.</Text>
           )}
           <Text style={styles.live}>
             Live location: {field.session?.liveLocationEnabled ?? user?.liveLocationEnabled ? "On" : "Off"}
@@ -169,7 +174,6 @@ export default function HomeScreen() {
           ) : (
             <Button title="Start Field Work" tone="green" onPress={() => field.start()} />
           )}
-          <Button title="Open today’s beat" tone="outline" onPress={() => router.push("/visits")} />
         </Card>
       ) : null}
 
@@ -177,13 +181,13 @@ export default function HomeScreen() {
         <Card style={styles.beatCard}>
           <View style={styles.beatTop}>
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={styles.beatKicker}>Today’s beat</Text>
+              <Text style={styles.beatKicker}>Step 2 · Today’s target</Text>
               <Text style={styles.cardTitle}>{beatToday.beatName || "Today’s beat"}</Text>
               {beatToday.territory ? <Text style={styles.beatTerritory}>{beatToday.territory}</Text> : null}
               <Text style={styles.live}>
                 {beatToday.visitedOnBeat ?? beatToday.completedToday}/
-                {beatToday.beatSize ?? beatToday.stops.length} visited
-                {beatToday.missedOnBeat != null ? ` · ${beatToday.missedOnBeat} pending` : ""}
+                {beatToday.beatSize ?? beatToday.stops.length} shops on this beat
+                {beatToday.missedOnBeat != null ? ` · ${beatToday.missedOnBeat} left` : ""}
               </Text>
             </View>
             <ProgressRing
@@ -212,15 +216,15 @@ export default function HomeScreen() {
             />
           </View>
           {beatToday.message ? <Text style={typo.muted}>{beatToday.message}</Text> : null}
-          <Button title="Open beat list" tone="outline" onPress={() => router.push("/visits")} />
-          <Button title="Add lead" tone="green" onPress={() => router.push("/lead/new")} />
+          <Button title="Open today’s beat list" tone="green" onPress={() => router.push("/visits")} />
         </Card>
       ) : null}
       {isSales(roles) && !beatToday ? (
         <Card>
-          <Text style={styles.cardTitle}>Leads</Text>
-          <Text style={typo.muted}>Add a shop when you find a new lead in the field.</Text>
-          <Button title="Add lead" tone="green" onPress={() => router.push("/lead/new")} />
+          <Text style={styles.cardTitle}>Today’s beat</Text>
+          <Text style={typo.muted}>No beat scheduled for you today. Ask your manager to assign one.</Text>
+          <Button title="Open Beat tab" tone="outline" onPress={() => router.push("/visits")} />
+          <Button title="Add a new lead" tone="green" onPress={() => router.push("/lead/new")} />
         </Card>
       ) : null}
 

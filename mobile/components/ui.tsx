@@ -471,7 +471,7 @@ export function ActionTile({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={label.replace(/\n/g, " ")}
       style={({ pressed }) => [styles.action, pressed && styles.pressed]}
     >
       <View style={[styles.actionIcon, { backgroundColor: palette.bg }]}>
@@ -670,11 +670,13 @@ const styles = StyleSheet.create({
   kpiLabel: { color: colors.muted, fontSize: 13, fontWeight: "600" },
   kpiHint: { fontSize: 12, fontWeight: "700" },
   action: {
-    flex: 1,
+    width: 96,
+    flexGrow: 0,
+    flexShrink: 0,
     alignItems: "center",
     gap: 8,
     paddingVertical: 14,
-    paddingHorizontal: 4,
+    paddingHorizontal: 8,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -682,7 +684,14 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   actionIcon: { width: 46, height: 46, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  actionLabel: { color: colors.text, fontSize: 12, fontWeight: "700", textAlign: "center" },
+  actionLabel: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+    lineHeight: 15,
+    width: "100%",
+  },
   section: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
   sectionTitle: { fontSize: 17, fontWeight: "800", color: colors.text },
   sectionAction: { color: colors.blue, fontWeight: "800", fontSize: 13 },

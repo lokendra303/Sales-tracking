@@ -103,17 +103,17 @@ export default function VisitsScreen() {
     <Screen
       header={
         <ScreenHeader
-          title="Visits"
+          title={tab === "today" ? "Today’s beat" : "Visit history"}
           subtitle={
             tab === "today"
-              ? "Today’s beat target · every lead on the beat · check in one by one"
-              : "Filter completed visits by start and end date"
+              ? "Only your beat for today · leads on that beat · check in one by one"
+              : "Past visits and place-photo proof"
           }
         />
       }
     >
       <View style={styles.tabs}>
-        <Chip label="Today" on={tab === "today"} onPress={() => setTab("today")} />
+        <Chip label="Today’s beat" on={tab === "today"} onPress={() => setTab("today")} />
         <Chip label="History" on={tab === "history"} onPress={() => setTab("history")} />
       </View>
       {tab === "history" ? <VisitHistory /> : null}

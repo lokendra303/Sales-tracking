@@ -18,7 +18,7 @@ type TabBarProps = {
 const icons: Record<string, [keyof typeof Ionicons.glyphMap, keyof typeof Ionicons.glyphMap]> = {
   index: ["home-outline", "home"],
   leads: ["briefcase-outline", "briefcase"],
-  visits: ["location-outline", "location"],
+  visits: ["map-outline", "map"],
   reports: ["bar-chart-outline", "bar-chart"],
   team: ["people-outline", "people"],
   settings: ["settings-outline", "settings"],

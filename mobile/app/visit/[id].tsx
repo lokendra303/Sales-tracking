@@ -21,7 +21,7 @@ import { haversineMeters } from "@/lib/geo";
 import { useOffline } from "@/lib/offline";
 import { ensureGalleryAccess } from "@/lib/gallery";
 import { keepPhoto } from "@/lib/photos";
-import { openCall, openNavigate, openWhatsApp, when } from "@/lib/format";
+import { openCall, openMapPin, openNavigate, openWhatsApp, when } from "@/lib/format";
 import { isManager, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
@@ -535,7 +535,7 @@ function LocationRow({
         </Text>
       </View>
       {has ? (
-        <Pressable onPress={() => openNavigate(lat, lng)} accessibilityLabel={`Open ${label} location on map`}>
+        <Pressable onPress={() => openMapPin(lat, lng)} accessibilityLabel={`Open ${label} location on map`}>
           <Text style={styles.locLink}>Map</Text>
         </Pressable>
       ) : null}

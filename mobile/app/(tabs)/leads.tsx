@@ -164,7 +164,7 @@ export default function LeadsScreen() {
           subtitle={
             office
               ? "Approve, assign, and review — same workflow as the desk portal"
-              : "Your shops and what to do next"
+              : "All your shops · for today’s route list use the Beat tab"
           }
           right={
             <Pressable style={styles.add} onPress={() => router.push("/lead/new")} accessibilityLabel="Add lead">

@@ -47,7 +47,7 @@ export default function TabLayout() {
         name="visits"
         options={{
           href: sales || manager ? "/visits" : null,
-          title: manager ? "Proof" : "Visits",
+          title: manager ? "Proof" : "Beat",
           tabBarShowLabel: sales || manager,
         }}
       />

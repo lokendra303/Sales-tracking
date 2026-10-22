@@ -4,6 +4,7 @@ import { MapView } from "../components/MapView";
 import { useExecutives } from "../components/ExecFilter";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { mapsUrl as buildMapsUrl } from "../lib/maps";
 import { mobileDigits } from "../lib/phone";
 
 type Lead = {
@@ -28,11 +29,14 @@ type Lead = {
 };
 
 function mapsUrl(lead: Lead) {
-  if (lead.latitude != null && lead.longitude != null) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${lead.latitude},${lead.longitude}`;
-  }
-  const q = [lead.address, lead.city].filter(Boolean).join(", ");
-  return q ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}` : null;
+  return buildMapsUrl({
+    latitude: lead.latitude,
+    longitude: lead.longitude,
+    address: lead.address,
+    city: lead.city,
+    name: lead.name,
+    mode: "dir",
+  });
 }
 
 type GeoHit = { lat: number; lng: number; label: string; kind: string };

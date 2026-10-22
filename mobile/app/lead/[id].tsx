@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { api, type Lead } from "@/lib/api";
 import { bestFix, loadLocation } from "@/lib/device-location";
 import { useReminders } from "@/lib/reminders-context";
-import { leadIsOpen, leadStateLabel, money, openCall, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
+import { leadIsOpen, leadStateLabel, money, openCall, openMapPin, openNavigate, openWhatsApp, tempColor, when } from "@/lib/format";
 import { isManager, isSales } from "@/lib/roles";
 import { colors, typo } from "@/lib/theme";
 
@@ -413,7 +413,7 @@ export default function LeadDetailScreen() {
               {locating ? <ActivityIndicator color={colors.blue} /> : null}
               <Text style={typo.muted}>{pin ? `Pin ${pin.lat.toFixed(6)}, ${pin.lng.toFixed(6)}` : "No pin chosen yet."}</Text>
               {pin ? (
-                <Button title="Check pin on map" tone="ghost" onPress={() => openNavigate(pin.lat, pin.lng)} />
+                <Button title="Check pin on map" tone="ghost" onPress={() => openMapPin(pin.lat, pin.lng)} />
               ) : null}
               <ActionRow>
                 <Button title="Save location" tone="green" flex onPress={saveLocation} disabled={locating || !pin} />
