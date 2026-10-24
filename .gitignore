@@ -12,3 +12,4 @@ mobile/.expo
 mobile/dist
 mobile/android
 mobile/ios
+.rocketride/

@@ -212,6 +212,140 @@ export async function resolveMapsLink(raw: string): Promise<GeoHit | null> {
   return null;
 }
 
+const ROMAN: Record<string, string> = {
+  i: "1",
+  ii: "2",
+  iii: "3",
+  iv: "4",
+  v: "5",
+  vi: "6",
+  vii: "7",
+  viii: "8",
+  ix: "9",
+  x: "10",
+  xi: "11",
+  xii: "12",
+};
+
+type PhotonFeature = {
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    name?: string;
+    street?: string;
+    housenumber?: string;
+    district?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    osm_key?: string;
+    osm_value?: string;
+  };
+};
+
+function normalizePlace(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => ROMAN[word] ?? word)
+    .join(" ");
+}
+
+/** Plot / flat / “No. 36 B” lines are rarely on the map. The area and city are what can be found. */
+function isUnitPart(part: string) {
+  const text = part.trim();
+  if (!text) return true;
+  if (/^(plot|flat|house|door|shop|survey|khasra|ward|no\.?|number|#)\b/i.test(text)) return true;
+  if (/^phase[-\s]*[0-9ivx]+(\s+(plot|block|sector|flat|house))?$/i.test(text)) return true;
+  if (/^(no\.?\s*)?\d+[a-z]?(\s*[-/]\s*\d+[a-z]?)?$/i.test(text)) return true;
+  return false;
+}
+
+function stripHouseNumber(part: string) {
+  const stripped = part
+    .replace(/^(?:plot|flat|house|shop|door|no\.?|number|#)?\s*[-:]?\s*\d+\s*[a-z]?\s*[,/-]?\s*/i, "")
+    .trim();
+  if (stripped.length >= 3 && /[a-z]/i.test(stripped) && !/^th\b/i.test(stripped)) return stripped;
+  return part.trim();
+}
+
+function localityQuery(query: string) {
+  const parts = query
+    .split(",")
+    .map((part) => stripHouseNumber(part.trim()))
+    .filter((part) => part.length >= 3 && !isUnitPart(part));
+  if (parts.length) return parts.join(", ");
+  return query
+    .replace(/\b(plot|flat|house|door|shop|survey|khasra)\s*(no\.?|number|#)?\s*[-:]?\s*[a-z0-9/-]+\b/gi, " ")
+    .replace(/\b(no\.?|number|#)\s*[-:]?\s*\d+[a-z]?\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/(,\s*){2,}/g, ", ")
+    .trim();
+}
+
+function numberClash(phrase: string, hay: string) {
+  const match = phrase.match(/^(.*\D)\s+(\d+)$/);
+  if (!match) return false;
+  const stem = match[1]!.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = hay.match(new RegExp(`${stem}\\s+(\\d+)`));
+  return Boolean(found && found[1] !== match[2]);
+}
+
+function placeScore(query: string, label: string, kind: string) {
+  const phrases = localityQuery(query)
+    .split(",")
+    .map((part) => normalizePlace(part))
+    .filter((part) => part.length >= 3);
+  const hay = normalizePlace(label);
+  if (!hay || !phrases.length) return 0;
+  let score = 0;
+  for (const phrase of phrases) {
+    if (hay.includes(phrase)) score += 12 + phrase.length;
+    else if (numberClash(phrase, hay)) score -= 20;
+    else {
+      const words = phrase.split(" ").filter((word) => word.length > 2);
+      score += words.filter((word) => hay.split(" ").includes(word)).length * 2;
+    }
+  }
+  if (/\b(motorway|trunk|highway)\b/.test(kind)) score -= 8;
+  return score;
+}
+
+function inIndia(label: string) {
+  const hay = normalizePlace(label);
+  return hay === "india" || hay.startsWith("india ") || hay.includes(" india");
+}
+
+function asPhoton(feature: PhotonFeature): GeoHit | null {
+  const [lng, lat] = feature.geometry?.coordinates ?? [];
+  if (lat == null || lng == null) return null;
+  const props = feature.properties ?? {};
+  const label = [props.name, props.housenumber, props.street, props.district, props.city, props.state, props.country]
+    .filter(Boolean)
+    .join(", ");
+  const hit = coordHit(lat, lng, label);
+  if (!hit) return null;
+  return { ...hit, kind: [props.osm_key, props.osm_value].filter(Boolean).join("/") || hit.kind };
+}
+
+/** Fuzzy street search. Nominatim often returns nothing for Indian plot addresses. */
+async function photon(query: string) {
+  const params = new URLSearchParams({
+    q: query,
+    limit: "8",
+  });
+  const response = await fetch(`https://photon.komoot.io/api/?${params}`, {
+    headers: { Accept: "application/json", "User-Agent": "SalesTrack/1.0 (field sales)" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) return [];
+  const body = (await response.json()) as { features?: PhotonFeature[] };
+  return (body.features ?? []).map(asPhoton).filter((hit): hit is GeoHit => hit != null);
+}
+
 async function nominatim(query: string, country?: string) {
   const params = new URLSearchParams({
     format: "jsonv2",
@@ -241,21 +375,38 @@ export async function searchPlaces(query: string): Promise<GeoHit[]> {
   const searchQ = looksLikeMapsLink(q) && placeName ? placeName : q;
   if (looksLikeMapsLink(q) && !placeName) return [];
 
-  try {
-    const local = await nominatim(searchQ, "in");
-    const hits = local.length ? local : await nominatim(searchQ);
-    return hits.sort((a, b) => Number(isPrecisePlace(b.kind)) - Number(isPrecisePlace(a.kind)));
-  } catch {
-    return [];
+  const area = localityQuery(searchQ);
+  const photonQueries = [...new Set([area, searchQ].filter((item) => item.length >= 3))];
+  const batches = await Promise.all([
+    ...photonQueries.map((item) => photon(item).catch(() => [] as GeoHit[])),
+    nominatim(area.length >= 3 ? area : searchQ, "in").catch(() => [] as GeoHit[]),
+  ]);
+  let hits = batches.flat();
+  if (!hits.length && area !== searchQ) hits = await nominatim(searchQ, "in").catch(() => []);
+  if (!hits.length) hits = await nominatim(searchQ).catch(() => []);
+
+  const ranked = hits
+    .map((hit) => ({ hit, score: placeScore(searchQ, hit.label, hit.kind) }))
+    .sort((a, b) => b.score - a.score);
+  const india = ranked.filter((row) => inIndia(row.hit.label));
+  const pool = india.some((row) => row.score > 0) ? india : ranked;
+  const seen = new Set<string>();
+  const out: GeoHit[] = [];
+  for (const row of pool) {
+    if (row.score <= 0) continue;
+    const id = `${row.hit.lat.toFixed(3)},${row.hit.lng.toFixed(3)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(row.hit);
+    if (out.length >= 5) break;
   }
+  return out;
 }
 
 export async function geocodeAddress(query: string): Promise<GeoPoint | null> {
-  const hits = await searchPlaces(query);
-  if (!hits.length) return null;
-  const precise = hits.find((hit) => isPrecisePlace(hit.kind)) ?? hits[0];
-  if (!precise) return null;
-  return { lat: precise.lat, lng: precise.lng, label: precise.label };
+  const [best] = await searchPlaces(query);
+  if (!best) return null;
+  return { lat: best.lat, lng: best.lng, label: best.label };
 }
 
 export function parseCoord(value: unknown, min: number, max: number) {

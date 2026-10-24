@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { router } from "expo-router";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,6 +26,8 @@ export default function NewLeadScreen() {
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [pinning, setPinning] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const findSeq = useRef(0);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [notes, setNotes] = useState("");
@@ -56,6 +58,43 @@ export default function NewLeadScreen() {
       Alert.alert("Could not pin", err instanceof Error ? err.message : "Try again at the shop.");
     } finally {
       setPinning(false);
+    }
+  }
+
+  async function findAddress(opts?: { quiet?: boolean }) {
+    if (!accessToken) return;
+    const query = [address, city].filter(Boolean).join(", ").trim();
+    if (query.length < 3) {
+      if (!opts?.quiet) Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
+      return;
+    }
+    const local = parseMapsLink(query);
+    if (local) {
+      setPin({ lat: local.lat, lng: local.lng });
+      setPinLabel("From Google Maps link");
+      return;
+    }
+    const seq = ++findSeq.current;
+    setFinding(true);
+    try {
+      const hits = await api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(query)}`, {
+        token: accessToken,
+      });
+      if (seq !== findSeq.current) return;
+      const hit = hits[0];
+      if (!hit) {
+        if (!opts?.quiet) {
+          Alert.alert("Not found", "Add the area and city, or paste a Google Maps link.");
+        }
+        return;
+      }
+      setPin({ lat: hit.lat, lng: hit.lng });
+      setPinLabel(hit.label || "Matched address");
+    } catch (err) {
+      if (seq !== findSeq.current || opts?.quiet) return;
+      Alert.alert("Could not find that address", err instanceof Error ? err.message : "Try again.");
+    } finally {
+      if (seq === findSeq.current) setFinding(false);
     }
   }
 
@@ -171,8 +210,19 @@ export default function NewLeadScreen() {
             .catch(() => undefined);
         }}
         placeholder="Street, area — or paste Maps link"
+        onEndEditing={() => {
+          if (!looksLikeMapsLink(address)) void findAddress({ quiet: true });
+        }}
       />
-      <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
+      <Field
+        label="City"
+        value={city}
+        onChangeText={setCity}
+        placeholder="City"
+        onEndEditing={() => {
+          if (address.trim().length >= 3 && !looksLikeMapsLink(address)) void findAddress({ quiet: true });
+        }}
+      />
       <View style={styles.field}>
         <Text style={styles.label}>Shop location</Text>
         {pin ? (
@@ -188,8 +238,9 @@ export default function NewLeadScreen() {
             </View>
           </View>
         ) : (
-          <Text style={styles.hint}>Paste a Maps link above, pick on the map, or use GPS at the shop.</Text>
+          <Text style={styles.hint}>Type the address and city, then leave the field. A Maps link still drops the pin immediately.</Text>
         )}
+        <Button title="Find address" icon="search-outline" tone="outline" onPress={() => findAddress()} loading={finding} />
         <ActionRow>
           <Button title={pin ? "Change on map" : "Pick on map"} icon="map-outline" onPress={() => setMapOpen(true)} flex />
           <Button title="Use my GPS here" icon="locate-outline" tone="outline" onPress={pinShop} loading={pinning} flex />
