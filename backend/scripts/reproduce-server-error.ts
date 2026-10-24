@@ -31,7 +31,7 @@ async function main() {
     "tenants:",
     tenants.map((t) => `${t.id}:${t.slug}`).join(", ") || "(none)",
   );
-
+// testing this
   const sales = await prisma.user.findMany({
     where: {
       status: "ACTIVE",
