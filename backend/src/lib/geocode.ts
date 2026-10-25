@@ -273,10 +273,7 @@ function stripHouseNumber(part: string) {
 }
 
 function localityQuery(query: string) {
-  const parts = query
-    .split(",")
-    .map((part) => stripHouseNumber(part.trim()))
-    .filter((part) => part.length >= 3 && !isUnitPart(part));
+  const parts = meaningfulParts(query);
   if (parts.length) return parts.join(", ");
   return query
     .replace(/\b(plot|flat|house|door|shop|survey|khasra)\s*(no\.?|number|#)?\s*[-:]?\s*[a-z0-9/-]+\b/gi, " ")
@@ -284,6 +281,28 @@ function localityQuery(query: string) {
     .replace(/\s+/g, " ")
     .replace(/(,\s*){2,}/g, ", ")
     .trim();
+}
+
+/** Drop floors, shop numbers, and "next to" so a long typed address can still be searched. */
+function meaningfulParts(query: string) {
+  const normalized = query
+    .replace(/\b(next to|near|opp\.?|opposite|behind|beside|adjacent to|in front of)\b/gi, ",")
+    .replace(/\b(first|second|third|fourth|ground|upper|lower)\s+floor\b/gi, ",")
+    .replace(/\b(shop|flat|plot|house|door|unit|floor)\s*(no\.?|number|#)?\s*[-:]?\s*[a-z0-9]+(?:\s*[&/,.-]\s*[a-z0-9]+)*/gi, ",")
+    .replace(/\b(?:ff|sf|gf|ugf)\s*[-:]?\s*[a-z0-9]+(?:\s*[&/,.-]\s*[a-z0-9]+)*/gi, ",");
+  return normalized
+    .split(",")
+    .map((part) => stripHouseNumber(part).replace(/\s+/g, " ").trim())
+    .filter((part) => part.length >= 3 && !isUnitPart(part) && !/^(sector|block|phase|ward|floor|near|no)$/i.test(part));
+}
+
+function addressVariants(query: string) {
+  const full = query.trim();
+  const parts = meaningfulParts(full);
+  const cleaned = parts.join(", ");
+  const mid = parts.slice(-3).join(", ");
+  const tail = parts.slice(-2).join(", ");
+  return [...new Set([full, cleaned, mid, tail].filter((item) => item.length >= 3))].slice(0, 4);
 }
 
 function numberClash(phrase: string, hay: string) {
@@ -375,32 +394,39 @@ export async function searchPlaces(query: string): Promise<GeoHit[]> {
   const searchQ = looksLikeMapsLink(q) && placeName ? placeName : q;
   if (looksLikeMapsLink(q) && !placeName) return [];
 
-  const area = localityQuery(searchQ);
-  const photonQueries = [...new Set([area, searchQ].filter((item) => item.length >= 3))];
-  const batches = await Promise.all([
-    ...photonQueries.map((item) => photon(item).catch(() => [] as GeoHit[])),
-    nominatim(area.length >= 3 ? area : searchQ, "in").catch(() => [] as GeoHit[]),
-  ]);
-  let hits = batches.flat();
-  if (!hits.length && area !== searchQ) hits = await nominatim(searchQ, "in").catch(() => []);
-  if (!hits.length) hits = await nominatim(searchQ).catch(() => []);
-
-  const ranked = hits
-    .map((hit) => ({ hit, score: placeScore(searchQ, hit.label, hit.kind) }))
-    .sort((a, b) => b.score - a.score);
-  const india = ranked.filter((row) => inIndia(row.hit.label));
-  const pool = india.some((row) => row.score > 0) ? india : ranked;
-  const seen = new Set<string>();
-  const out: GeoHit[] = [];
-  for (const row of pool) {
-    if (row.score <= 0) continue;
-    const id = `${row.hit.lat.toFixed(3)},${row.hit.lng.toFixed(3)}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(row.hit);
-    if (out.length >= 5) break;
+  for (const variant of addressVariants(searchQ)) {
+    const [fromPhoton, fromNominatim] = await Promise.all([
+      photon(variant).catch(() => [] as GeoHit[]),
+      nominatim(variant, "in").catch(() => [] as GeoHit[]),
+    ]);
+    const hits = rankPlaceHits(variant, [...fromPhoton, ...fromNominatim]);
+    if (hits.length) return hits;
   }
-  return out;
+
+  const fallback = addressVariants(searchQ).at(-1) ?? searchQ;
+  return rankPlaceHits(fallback, await nominatim(fallback).catch(() => []));
+}
+
+function rankPlaceHits(query: string, hits: GeoHit[]) {
+  const seen = new Set<string>();
+  const unique: { hit: GeoHit; order: number }[] = [];
+  hits.forEach((hit, index) => {
+    const id = `${hit.lat.toFixed(4)},${hit.lng.toFixed(4)}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    unique.push({ hit, order: index });
+  });
+
+  return unique
+    .map(({ hit, order }) => {
+      const wording = placeScore(query, hit.label, hit.kind);
+      const relevance = Math.max(0, 30 - order);
+      const india = inIndia(hit.label) ? 3 : 0;
+      return { hit, score: relevance + wording + india };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((row) => row.hit);
 }
 
 export async function geocodeAddress(query: string): Promise<GeoPoint | null> {

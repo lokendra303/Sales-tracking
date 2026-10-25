@@ -27,7 +27,9 @@ export default function NewLeadScreen() {
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [pinning, setPinning] = useState(false);
   const [finding, setFinding] = useState(false);
+  const [lookupError, setLookupError] = useState("");
   const findSeq = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [notes, setNotes] = useState("");
@@ -61,9 +63,18 @@ export default function NewLeadScreen() {
     }
   }
 
-  async function findAddress(opts?: { quiet?: boolean }) {
+  function scheduleLookup(nextAddress: string, nextCity: string) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const query = [nextAddress, nextCity].filter(Boolean).join(", ").trim();
+    if (looksLikeMapsLink(query) || query.length < 5) return;
+    searchTimer.current = setTimeout(() => {
+      void findAddress({ quiet: true, address: nextAddress, city: nextCity });
+    }, 700);
+  }
+
+  async function findAddress(opts?: { quiet?: boolean; address?: string; city?: string }) {
     if (!accessToken) return;
-    const query = [address, city].filter(Boolean).join(", ").trim();
+    const query = [opts?.address ?? address, opts?.city ?? city].filter(Boolean).join(", ").trim();
     if (query.length < 3) {
       if (!opts?.quiet) Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
       return;
@@ -76,6 +87,7 @@ export default function NewLeadScreen() {
     }
     const seq = ++findSeq.current;
     setFinding(true);
+    setLookupError("");
     try {
       const hits = await api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(query)}`, {
         token: accessToken,
@@ -83,11 +95,13 @@ export default function NewLeadScreen() {
       if (seq !== findSeq.current) return;
       const hit = hits[0];
       if (!hit) {
+        setLookupError("No place matched that address. Add the area and city, or drop the pin on the map.");
         if (!opts?.quiet) {
           Alert.alert("Not found", "Add the area and city, or paste a Google Maps link.");
         }
         return;
       }
+      setLookupError("");
       setPin({ lat: hit.lat, lng: hit.lng });
       setPinLabel(hit.label || "Matched address");
     } catch (err) {
@@ -191,25 +205,29 @@ export default function NewLeadScreen() {
         onChangeText={(text) => {
           setAddress(text);
           const trimmed = text.trim();
-          if (!looksLikeMapsLink(trimmed)) return;
-          const local = parseMapsLink(trimmed);
-          if (local) {
-            setPin({ lat: local.lat, lng: local.lng });
-            setPinLabel("From Google Maps link");
+          if (looksLikeMapsLink(trimmed)) {
+            if (searchTimer.current) clearTimeout(searchTimer.current);
+            const local = parseMapsLink(trimmed);
+            if (local) {
+              setPin({ lat: local.lat, lng: local.lng });
+              setPinLabel("From Google Maps link");
+              return;
+            }
+            if (!accessToken) return;
+            api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(trimmed)}`, {
+              token: accessToken,
+            })
+              .then((hits) => {
+                if (!hits[0]) return;
+                setPin({ lat: hits[0].lat, lng: hits[0].lng });
+                setPinLabel(hits[0].label || "From Google Maps link");
+              })
+              .catch(() => undefined);
             return;
           }
-          if (!accessToken) return;
-          api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(trimmed)}`, {
-            token: accessToken,
-          })
-            .then((hits) => {
-              if (!hits[0]) return;
-              setPin({ lat: hits[0].lat, lng: hits[0].lng });
-              setPinLabel(hits[0].label || "From Google Maps link");
-            })
-            .catch(() => undefined);
+          scheduleLookup(trimmed, city);
         }}
-        placeholder="Street, area — or paste Maps link"
+        placeholder="Any street or area, or paste a Maps link"
         onEndEditing={() => {
           if (!looksLikeMapsLink(address)) void findAddress({ quiet: true });
         }}
@@ -217,7 +235,10 @@ export default function NewLeadScreen() {
       <Field
         label="City"
         value={city}
-        onChangeText={setCity}
+        onChangeText={(text) => {
+          setCity(text);
+          scheduleLookup(address, text.trim());
+        }}
         placeholder="City"
         onEndEditing={() => {
           if (address.trim().length >= 3 && !looksLikeMapsLink(address)) void findAddress({ quiet: true });
@@ -238,7 +259,11 @@ export default function NewLeadScreen() {
             </View>
           </View>
         ) : (
-          <Text style={styles.hint}>Type the address and city, then leave the field. A Maps link still drops the pin immediately.</Text>
+          <Text style={styles.hint}>
+            {finding
+              ? "Looking up this address…"
+              : lookupError || "Any address is looked up when you pause. A Maps link drops the pin immediately."}
+          </Text>
         )}
         <Button title="Find address" icon="search-outline" tone="outline" onPress={() => findAddress()} loading={finding} />
         <ActionRow>

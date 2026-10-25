@@ -1,4 +1,4 @@
-import { useEffect, useState, type ClipboardEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ExecFilter, useExecutives, type ExecValue } from "../components/ExecFilter";
 import { MapView } from "../components/MapView";
@@ -47,6 +47,7 @@ export function LeadsPage() {
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [assigneeId, setAssigneeId] = useState("");
+  const geoSeq = useRef(0);
   const exec = execFromQuery(searchParams.get("assigneeId"));
   const pendingOnly = searchParams.get("approval") === "pending";
 
@@ -80,32 +81,37 @@ export function LeadsPage() {
     setAssigneeId("");
   }
 
-  async function findAddress(override?: string) {
+  async function findAddress(override?: string, quiet = false) {
     if (!accessToken) return;
     const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
     if (query.length < 3) {
-      setError("Type the shop address, or paste a Google Maps link.");
+      if (!quiet) setError("Type the shop address, or paste a Google Maps link.");
       return;
     }
-    setError("");
+    if (!quiet) setError("");
     const local = parseMapsLink(query);
     if (local) {
       setPin({ lat: local.lat, lng: local.lng });
       setNotice("Pin moved to the Google Maps link. Save the lead when ready.");
       return;
     }
+    const seq = ++geoSeq.current;
     try {
       const hits = await api<{ lat: number; lng: number; kind?: string }[]>(`/geo?q=${encodeURIComponent(query)}`, {
         token: accessToken,
       });
+      if (seq !== geoSeq.current) return;
       if (!hits.length) {
-        setError(
-          looksLikeMapsLink(query)
-            ? "Could not read that Google Maps link. Open it in Chrome, copy the long URL from the address bar, or click the map."
-            : "Could not find that address. Click the map to drop a pin.",
-        );
+        if (!quiet) {
+          setError(
+            looksLikeMapsLink(query)
+              ? "Could not read that Google Maps link. Open it in Chrome, copy the long URL from the address bar, or click the map."
+              : "Could not find that address. Click the map to drop a pin.",
+          );
+        }
         return;
       }
+      setError("");
       setPin({ lat: hits[0].lat, lng: hits[0].lng });
       setNotice(
         looksLikeMapsLink(query)
@@ -113,9 +119,20 @@ export function LeadsPage() {
           : "Check the pin is on the shop. Click the map to move it.",
       );
     } catch (err) {
+      if (seq !== geoSeq.current || quiet) return;
       setError(err instanceof Error ? err.message : "Could not find that address.");
     }
   }
+
+  useEffect(() => {
+    if (!adding || !accessToken) return;
+    const query = [address, city].filter(Boolean).join(", ").trim();
+    if (looksLikeMapsLink(query) || query.length < 5) return;
+    const timer = window.setTimeout(() => {
+      void findAddress(query, true);
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [adding, address, city, accessToken]);
 
   function onAddressPaste(event: ClipboardEvent<HTMLInputElement>) {
     const pasted = event.clipboardData.getData("text").trim();
@@ -296,7 +313,7 @@ export function LeadsPage() {
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 onPaste={onAddressPaste}
-                placeholder="Paste maps.app.goo.gl link — pin updates automatically"
+                placeholder="Any street, area, or a Google Maps link"
               />
             </label>
             <label>
