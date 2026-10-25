@@ -130,7 +130,7 @@ export function LeadsPage() {
     if (looksLikeMapsLink(query) || query.length < 5) return;
     const timer = window.setTimeout(() => {
       void findAddress(query, true);
-    }, 700);
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [adding, address, city, accessToken]);
 

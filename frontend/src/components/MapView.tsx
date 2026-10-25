@@ -46,16 +46,22 @@ export function MapView({
         .addTo(map);
       marks.current.push(marker);
     }
-    if (valid.length === 1) map.setView([valid[0].lat, valid[0].lng], 15);
-    else if (valid.length > 1) {
-      map.fitBounds(
-        L.latLngBounds(valid.map((pin) => [pin.lat, pin.lng])),
-        { padding: [36, 36] },
-      );
-    } else {
-      map.setView([28.6139, 77.209], 11);
-    }
-    const timer = window.setTimeout(() => map.invalidateSize(), 80);
+    const show = () => {
+      if (valid.length === 1) map.flyTo([valid[0].lat, valid[0].lng], 16, { duration: 0.45 });
+      else if (valid.length > 1) {
+        map.fitBounds(
+          L.latLngBounds(valid.map((pin) => [pin.lat, pin.lng])),
+          { padding: [36, 36] },
+        );
+      } else {
+        map.setView([28.6139, 77.209], 11);
+      }
+    };
+    show();
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+      show();
+    }, 60);
     return () => window.clearTimeout(timer);
   }, [key]);
 

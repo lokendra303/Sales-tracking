@@ -38,6 +38,8 @@ function round(value: number) {
 type Props = {
   visible: boolean;
   initial: LatLng | null;
+  /** Latest address pin. Moves the map even when it is already open. */
+  focus?: LatLng | null;
   onClose: () => void;
   onPick: (place: PickedPlace) => void;
   /** Backend /geo (needed for short maps.app.goo.gl links). */
@@ -52,7 +54,7 @@ export function LocationPicker(props: Props) {
   );
 }
 
-function PickerBody({ initial, onClose, onPick, resolveSearch }: Props) {
+function PickerBody({ initial, focus, onClose, onPick, resolveSearch }: Props) {
   const insets = useSafeAreaInsets();
   const map = useRef<PickMapHandle>(null);
   const [start] = useState<View3>(() => (initial ? { ...initial, zoom: 18 } : INDIA));
@@ -112,6 +114,12 @@ function PickerBody({ initial, onClose, onPick, resolveSearch }: Props) {
     },
     [lookUp],
   );
+
+  useEffect(() => {
+    if (!focus) return;
+    userMoved.current = true;
+    moveTo(focus.lat, focus.lng, 17);
+  }, [focus?.lat, focus?.lng, moveTo]);
 
   useEffect(() => {
     let alive = true;

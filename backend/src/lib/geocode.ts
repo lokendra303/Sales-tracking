@@ -350,15 +350,15 @@ function asPhoton(feature: PhotonFeature): GeoHit | null {
   return { ...hit, kind: [props.osm_key, props.osm_value].filter(Boolean).join("/") || hit.kind };
 }
 
-/** Fuzzy street search. Nominatim often returns nothing for Indian plot addresses. */
+/** Fuzzy street search. One short request — the slow path is several of these in a row. */
 async function photon(query: string) {
   const params = new URLSearchParams({
     q: query,
-    limit: "8",
+    limit: "5",
   });
   const response = await fetch(`https://photon.komoot.io/api/?${params}`, {
     headers: { Accept: "application/json", "User-Agent": "SalesTrack/1.0 (field sales)" },
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(2500),
   });
   if (!response.ok) return [];
   const body = (await response.json()) as { features?: PhotonFeature[] };
@@ -375,7 +375,7 @@ async function nominatim(query: string, country?: string) {
   if (country) params.set("countrycodes", country);
   const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
     headers: { Accept: "application/json", "User-Agent": "SalesTrack/1.0 (field sales)" },
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(3000),
   });
   if (!response.ok) return [];
   const rows = (await response.json()) as NominatimRow[];
@@ -394,17 +394,20 @@ export async function searchPlaces(query: string): Promise<GeoHit[]> {
   const searchQ = looksLikeMapsLink(q) && placeName ? placeName : q;
   if (looksLikeMapsLink(q) && !placeName) return [];
 
-  for (const variant of addressVariants(searchQ)) {
-    const [fromPhoton, fromNominatim] = await Promise.all([
-      photon(variant).catch(() => [] as GeoHit[]),
-      nominatim(variant, "in").catch(() => [] as GeoHit[]),
-    ]);
-    const hits = rankPlaceHits(variant, [...fromPhoton, ...fromNominatim]);
+  const variants = addressVariants(searchQ);
+  const cleaned = variants.find((item) => item !== searchQ) ?? searchQ;
+  const tail = variants[variants.length - 1] ?? cleaned;
+  const queries = [...new Set([cleaned, tail])];
+  const batches = await Promise.all(
+    queries.map(async (item) => ({ item, hits: await photon(item).catch(() => [] as GeoHit[]) })),
+  );
+  for (const batch of batches) {
+    const hits = rankPlaceHits(batch.item, batch.hits);
     if (hits.length) return hits;
   }
 
-  const fallback = addressVariants(searchQ).at(-1) ?? searchQ;
-  return rankPlaceHits(fallback, await nominatim(fallback).catch(() => []));
+  const backup = await nominatim(cleaned, "in").catch(() => [] as GeoHit[]);
+  return rankPlaceHits(cleaned, backup);
 }
 
 function rankPlaceHits(query: string, hits: GeoHit[]) {

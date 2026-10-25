@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
 import { LocationPicker, type PickedPlace } from "@/components/location-picker";
+import { PickMap, type PickMapHandle } from "@/components/pick-map";
+import { INDIA, pickerHtml, type MapMessage } from "@/lib/map-html";
 import { bestFix, loadLocation } from "@/lib/device-location";
 import { ActionRow, Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
 import { colors, radius } from "@/lib/theme";
@@ -32,6 +34,9 @@ export default function NewLeadScreen() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
+  const preview = useRef<PickMapHandle>(null);
+  const previewReady = useRef(false);
+  const [previewHtml] = useState(() => pickerHtml(INDIA));
   const [notes, setNotes] = useState("");
   const [potential, setPotential] = useState("");
   const [temperature, setTemperature] = useState<"HOT" | "WARM" | "COLD">("WARM");
@@ -69,7 +74,7 @@ export default function NewLeadScreen() {
     if (looksLikeMapsLink(query) || query.length < 5) return;
     searchTimer.current = setTimeout(() => {
       void findAddress({ quiet: true, address: nextAddress, city: nextCity });
-    }, 700);
+    }, 400);
   }
 
   async function findAddress(opts?: { quiet?: boolean; address?: string; city?: string }) {
@@ -102,14 +107,27 @@ export default function NewLeadScreen() {
         return;
       }
       setLookupError("");
-      setPin({ lat: hit.lat, lng: hit.lng });
+      const next = { lat: hit.lat, lng: hit.lng };
+      setPin(next);
       setPinLabel(hit.label || "Matched address");
+      preview.current?.setCenter(next.lat, next.lng, 16);
     } catch (err) {
       if (seq !== findSeq.current || opts?.quiet) return;
       Alert.alert("Could not find that address", err instanceof Error ? err.message : "Try again.");
     } finally {
       if (seq === findSeq.current) setFinding(false);
     }
+  }
+
+  useEffect(() => {
+    if (!pin || !previewReady.current) return;
+    preview.current?.setCenter(pin.lat, pin.lng, 16);
+  }, [pin]);
+
+  function onPreviewMessage(message: MapMessage) {
+    if (message.type !== "ready") return;
+    previewReady.current = true;
+    if (pin) preview.current?.setCenter(pin.lat, pin.lng, 16);
   }
 
   function pickPlace(place: PickedPlace) {
@@ -265,6 +283,9 @@ export default function NewLeadScreen() {
               : lookupError || "Any address is looked up when you pause. A Maps link drops the pin immediately."}
           </Text>
         )}
+        <View style={styles.mapPreview}>
+          <PickMap ref={preview} html={previewHtml} onMessage={onPreviewMessage} style={styles.map} />
+        </View>
         <Button title="Find address" icon="search-outline" tone="outline" onPress={() => findAddress()} loading={finding} />
         <ActionRow>
           <Button title={pin ? "Change on map" : "Pick on map"} icon="map-outline" onPress={() => setMapOpen(true)} flex />
@@ -274,6 +295,7 @@ export default function NewLeadScreen() {
       <LocationPicker
         visible={mapOpen}
         initial={pin}
+        focus={pin}
         onClose={() => setMapOpen(false)}
         onPick={pickPlace}
         resolveSearch={
@@ -327,4 +349,6 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   pinTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  mapPreview: { height: 220, borderRadius: radius.md, overflow: "hidden" },
+  map: { height: 220 },
 });
