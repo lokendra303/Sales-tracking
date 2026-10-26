@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomInt } from "node:crypto";
 import { env } from "../../config/env.js";
 import { prisma } from "../../lib/prisma.js";
-import { createRefreshTokenValue, hashPassword, hashToken, verifyPassword } from "../../lib/hash.js";
+import { createRefreshTokenValue, hashToken, passwordRecord, verifyPassword } from "../../lib/hash.js";
 import { queueMail } from "../../lib/mail.js";
 import { refreshExpiry, signAccessToken } from "../../lib/tokens.js";
 import { badRequest, forbidden, unauthorized } from "../../lib/errors.js";
@@ -259,13 +259,9 @@ export async function savePushToken(userId: number, token: string, deviceUid = "
 
 export async function changeOwnPassword(input: {
   userId: number;
-  roles: RoleCode[];
   oldPassword: string;
   newPassword: string;
 }) {
-  if (!input.roles.includes("ADMIN") && !input.roles.includes("MANAGER")) {
-    throw forbidden("Sales executives cannot change password here. Ask your manager.");
-  }
   const user = await prisma.user.findUnique({ where: { id: input.userId } });
   if (!user) throw unauthorized();
   if (!(await verifyPassword(input.oldPassword, user.passwordHash))) {
@@ -273,7 +269,7 @@ export async function changeOwnPassword(input: {
   }
   await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await hashPassword(input.newPassword) },
+    data: await passwordRecord(input.newPassword),
   });
 }
 
@@ -287,7 +283,7 @@ export async function setPassword(actorRoles: RoleCode[], tenantId: number, user
   }
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash: await hashPassword(password) },
+    data: await passwordRecord(password),
   });
   await prisma.refreshToken.updateMany({
     where: { userId, revokedAt: null },
@@ -417,7 +413,7 @@ export async function register(input: {
       name: input.name.trim(),
       phone,
       email,
-      passwordHash: await hashPassword(input.password),
+      ...(await passwordRecord(input.password)),
       status: "DISABLED",
       roles: { create: { roleId: managerRole.id } },
     },
@@ -566,7 +562,7 @@ export async function resetPasswordWithOtp(input: { phone: string; otp: string; 
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { passwordHash: await hashPassword(input.newPassword) },
+    data: await passwordRecord(input.newPassword),
   });
   await prisma.refreshToken.updateMany({
     where: { userId: user.id, revokedAt: null },

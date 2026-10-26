@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecPicker, useExecutives } from "@/components/exec-filter";
 import { leadStage, stageColors } from "@/lib/lead-stage";
@@ -27,6 +27,7 @@ export default function LeadDetailScreen() {
   const [assigning, setAssigning] = useState(false);
   const [editing, setEditing] = useState(false);
   const [address, setAddress] = useState("");
+  const [mapsLink, setMapsLink] = useState("");
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [matches, setMatches] = useState<{ lat: number; lng: number; label: string }[]>([]);
@@ -59,6 +60,7 @@ export default function LeadDetailScreen() {
         notes: next.notes ?? "",
       });
       setAddress(next.address ?? "");
+      setMapsLink(next.mapsLink ?? "");
       setCity(next.city ?? "");
       setPin(next.latitude != null && next.longitude != null ? { lat: next.latitude, lng: next.longitude } : null);
     } catch {
@@ -156,7 +158,8 @@ export default function LeadDetailScreen() {
 
   async function findAddress(override?: string, quiet = false) {
     if (!accessToken) return;
-    const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
+    const typed = [address, city].filter(Boolean).join(", ").trim();
+    const query = (override ?? (typed || mapsLink)).trim();
     if (query.length < 3) {
       if (!quiet) Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
       return;
@@ -219,18 +222,27 @@ export default function LeadDetailScreen() {
   }
 
   async function saveLocation() {
-    if (!accessToken || !id || !pin) return;
+    if (!accessToken || !id) return;
+    if (!pin && !address.trim() && !mapsLink.trim()) {
+      Alert.alert("Add a place", "Enter the street address or a Google Maps link.");
+      return;
+    }
     setLocating(true);
     try {
       await api(`/leads/${id}`, {
         method: "PUT",
         token: accessToken,
-        body: JSON.stringify({ address: address.trim(), city: city.trim(), latitude: pin.lat, longitude: pin.lng }),
+        body: JSON.stringify({
+          address: address.trim(),
+          mapsLink: mapsLink.trim(),
+          city: city.trim(),
+          ...(pin ? { latitude: pin.lat, longitude: pin.lng } : {}),
+        }),
       });
       setEditing(false);
       setMatches([]);
       await load();
-      Alert.alert("Location saved", "The executive finishes the visit within 300 m of this pin.");
+      Alert.alert("Saved", "Address and Google Maps link are updated.");
     } catch (err) {
       Alert.alert("Could not save", err instanceof Error ? err.message : "Try again.");
     } finally {
@@ -277,6 +289,11 @@ export default function LeadDetailScreen() {
         <Text style={typo.muted}>{lead.contactPerson || "No contact person"}</Text>
         <Text style={typo.body}>{lead.phone}</Text>
         <Text style={typo.muted}>{[lead.address, lead.city].filter(Boolean).join(", ") || "No address"}</Text>
+        {lead.mapsLink ? (
+          <Pressable onPress={() => Linking.openURL(lead.mapsLink!).catch(() => undefined)}>
+            <Text style={styles.link}>Google Maps link</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.beatLine}>
           {(lead.beats ?? []).length
             ? (lead.beats ?? []).map((b) => `${b.name}${b.hq ? ` · HQ ${b.hq}` : " · No HQ"}`).join(" · ")
@@ -346,11 +363,17 @@ export default function LeadDetailScreen() {
           />
         </Pressable>
       ) : null}
-      {lead.latitude != null || lead.address || lead.city ? (
+      {lead.latitude != null || lead.address || lead.city || lead.mapsLink ? (
         <Button
           title="Follow map to shop"
           tone="green"
-          onPress={() => openNavigate(lead.latitude, lead.longitude, [lead.address, lead.city].filter(Boolean).join(", "))}
+          onPress={() => {
+            if (lead.latitude == null && lead.mapsLink) {
+              Linking.openURL(lead.mapsLink).catch(() => undefined);
+              return;
+            }
+            openNavigate(lead.latitude, lead.longitude, [lead.address, lead.city].filter(Boolean).join(", "));
+          }}
         />
       ) : null}
       {sales && leadIsOpen(lead) ? (
@@ -420,30 +443,43 @@ export default function LeadDetailScreen() {
         </Card>
       ) : null}
 
-      {office ? (
+      {office || sales ? (
         <Card>
           <Text style={styles.section}>Shop location</Text>
           <Text style={typo.muted}>
-            {lead.latitude != null ? "Executives finish the visit within 300 m of this pin." : "No pin yet. Executives cannot finish a visit until you set it."}
+            {office
+              ? lead.latitude != null
+                ? "Executives finish the visit within 300 m of this pin."
+                : "No pin yet. Executives cannot finish a visit until you set it."
+              : "Update the street address and the Google Maps link. A map link moves the shop pin."}
           </Text>
           {editing ? (
             <>
               <Field
-                label="Address or Google Maps link"
+                label="Address"
                 value={address}
+                onChangeText={setAddress}
+                placeholder="Street, area, landmark"
+              />
+              <Field
+                label="Google Maps link"
+                value={mapsLink}
                 onChangeText={(text) => {
-                  setAddress(text);
+                  setMapsLink(text);
                   if (looksLikeMapsLink(text.trim())) void findAddress(text.trim(), true);
                 }}
-                placeholder="Paste maps.app.goo.gl link — pin updates"
+                placeholder="https://maps.app.goo.gl/…"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
               />
               <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
               <Text style={typo.muted}>
-                Paste a Google Maps link to move the pin. “Use my GPS” is only your live location — don’t use it after
-                pasting a shop link.
+                Address and the Google Maps link are saved separately. Pasting a link moves the pin. “Use my GPS” is only
+                your live location.
               </Text>
               <ActionRow>
-                <Button title="Find address / link" tone="outline" flex onPress={() => findAddress()} disabled={locating} />
+                <Button title="Find on map" tone="outline" flex onPress={() => findAddress()} disabled={locating} />
                 <Button title="Use my GPS here" tone="outline" flex onPress={pinHere} disabled={locating} />
               </ActionRow>
               {matches.length > 1
@@ -459,12 +495,22 @@ export default function LeadDetailScreen() {
                 <Button title="Check pin on map" tone="ghost" onPress={() => openMapPin(pin.lat, pin.lng)} />
               ) : null}
               <ActionRow>
-                <Button title="Save location" tone="green" flex onPress={saveLocation} disabled={locating || !pin} />
+                <Button
+                  title="Save location"
+                  tone="green"
+                  flex
+                  onPress={saveLocation}
+                  disabled={locating || (!pin && !address.trim() && !mapsLink.trim())}
+                />
                 <Button title="Cancel" tone="ghost" flex onPress={() => { setEditing(false); load(); }} />
               </ActionRow>
             </>
           ) : (
-            <Button title={lead.latitude != null ? "Correct location" : "Set location"} tone="outline" onPress={() => setEditing(true)} />
+            <Button
+              title={sales && !office ? "Update address and map link" : lead.latitude != null ? "Correct location" : "Set location"}
+              tone="outline"
+              onPress={() => setEditing(true)}
+            />
           )}
         </Card>
       ) : null}

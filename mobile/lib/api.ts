@@ -39,6 +39,7 @@ export type TeamPerson = {
   city: string | null;
   address: string | null;
   joiningDate: string | null;
+  loginPassword?: string | null;
   status: string;
   roles: string[];
   isOwner?: boolean;
@@ -55,6 +56,7 @@ export type Lead = {
   businessType: string | null;
   productInterest?: string | null;
   address: string | null;
+  mapsLink?: string | null;
   city: string | null;
   latitude: number | null;
   longitude: number | null;

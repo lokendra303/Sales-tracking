@@ -147,6 +147,7 @@ a:hover { color: var(--teal-2); }
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px 12px;
+  align-items: start;
 }
 @media (max-width: 980px) {
   .profile-grid { grid-template-columns: 1fr; }
@@ -156,8 +157,12 @@ a:hover { color: var(--teal-2); }
 .form-compact select,
 .form-compact textarea,
 .form-compact .password-field input {
-  padding: 9px 12px;
+  height: 40px;
+  padding: 8px 12px;
+  box-sizing: border-box;
 }
+.form-compact .password-field { width: 100%; }
+.form-compact textarea { height: auto; }
 .form-compact .more-toggle {
   justify-self: start;
   padding: 0;
@@ -202,6 +207,17 @@ input:focus, .search:focus, select:focus, textarea:focus {
   outline: 2px solid rgba(15, 76, 92, 0.28);
   border-color: var(--teal);
 }
+.exec-select {
+  width: min(100%, 240px);
+  margin: 8px 0 4px;
+  font-weight: 700;
+  border-radius: 999px;
+  background: var(--teal);
+  color: #fff;
+  border-color: var(--teal);
+  cursor: pointer;
+}
+.exec-select option { color: var(--text); background: #fff; font-weight: 600; }
 .search { max-width: 360px; margin: 8px 0 16px; }
 
 .password-field { position: relative; }

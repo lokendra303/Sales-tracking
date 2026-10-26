@@ -17,6 +17,7 @@ type Lead = {
   potential: number | null;
   temperature: "HOT" | "WARM" | "COLD";
   address: string | null;
+  mapsLink?: string | null;
   city: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -29,6 +30,7 @@ type Lead = {
 };
 
 function mapsUrl(lead: Lead) {
+  if (lead.mapsLink && (lead.latitude == null || lead.longitude == null)) return lead.mapsLink;
   return buildMapsUrl({
     latitude: lead.latitude,
     longitude: lead.longitude,
@@ -49,6 +51,7 @@ export function LeadDetailPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [address, setAddress] = useState("");
+  const [mapsLink, setMapsLink] = useState("");
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [matches, setMatches] = useState<GeoHit[]>([]);
@@ -77,6 +80,7 @@ export function LeadDetailPage() {
       notes: next.notes ?? "",
     });
     setAddress(next.address ?? "");
+    setMapsLink(next.mapsLink ?? "");
     setCity(next.city ?? "");
     setPin(next.latitude != null && next.longitude != null ? { lat: next.latitude, lng: next.longitude } : null);
   }
@@ -162,7 +166,8 @@ export function LeadDetailPage() {
 
   async function findAddress(override?: string) {
     if (!accessToken) return;
-    const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
+    const typed = [address, city].filter(Boolean).join(", ").trim();
+    const query = (override ?? (typed || mapsLink.trim())).trim();
     setError("");
     setNotice("");
     setMatches([]);
@@ -202,12 +207,19 @@ export function LeadDetailPage() {
     }
   }
 
+  function onMapsPaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pasted = event.clipboardData.getData("text").trim();
+    if (!looksLikeMapsLink(pasted)) return;
+    event.preventDefault();
+    setMapsLink(pasted);
+    void findAddress(pasted);
+  }
+
   function onAddressPaste(event: ClipboardEvent<HTMLInputElement>) {
     const pasted = event.clipboardData.getData("text").trim();
     if (!looksLikeMapsLink(pasted)) return;
-    // Paste into the field, then resolve so the pin leaves live GPS.
     event.preventDefault();
-    setAddress(pasted);
+    setMapsLink(pasted);
     void findAddress(pasted);
   }
 
@@ -226,8 +238,8 @@ export function LeadDetailPage() {
 
   async function saveLocation() {
     if (!accessToken || !lead) return;
-    if (!pin) {
-      setError("Drop the shop pin on the map before saving.");
+    if (!pin && !address.trim() && !mapsLink.trim()) {
+      setError("Enter the address or paste a Google Maps link.");
       return;
     }
     setSaving(true);
@@ -240,9 +252,9 @@ export function LeadDetailPage() {
           token: accessToken,
           body: JSON.stringify({
             address: address.trim(),
+            mapsLink: mapsLink.trim(),
             city: city.trim(),
-            latitude: pin.lat,
-            longitude: pin.lng,
+            ...(pin ? { latitude: pin.lat, longitude: pin.lng } : {}),
           }),
         }),
       );
@@ -268,7 +280,8 @@ export function LeadDetailPage() {
   const pins = pin ? [{ lat: pin.lat, lng: pin.lng, label: lead.name, extra: [address, city].filter(Boolean).join(", ") }] : [];
   const moved =
     pin != null && (lead.latitude == null || lead.longitude == null || pin.lat !== lead.latitude || pin.lng !== lead.longitude);
-  const edited = moved || address !== (lead.address ?? "") || city !== (lead.city ?? "");
+  const edited =
+    moved || address !== (lead.address ?? "") || mapsLink !== (lead.mapsLink ?? "") || city !== (lead.city ?? "");
 
   return (
     <div className="page">
@@ -297,7 +310,17 @@ export function LeadDetailPage() {
         </div>
       ) : null}
       {lead.approvalStatus === "REJECTED" && lead.rejectionNote ? <p className="error">{lead.rejectionNote}</p> : null}
-      <p className="muted">{[lead.address, lead.city].filter(Boolean).join(", ") || "No address yet"}</p>
+      <p className="muted">
+        {[lead.address, lead.city].filter(Boolean).join(", ") || "No address yet"}
+        {lead.mapsLink ? (
+          <>
+            {" · "}
+            <a href={lead.mapsLink} target="_blank" rel="noreferrer">
+              Google Maps link
+            </a>
+          </>
+        ) : null}
+      </p>
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}
 
@@ -398,12 +421,12 @@ export function LeadDetailPage() {
         </p>
         <div className="grid-2">
           <label>
-            Address or Google Maps link
+            Address
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               onPaste={onAddressPaste}
-              placeholder="Paste maps.app.goo.gl link — pin updates automatically"
+              placeholder="Street, area, landmark"
             />
           </label>
           <label>
@@ -411,13 +434,24 @@ export function LeadDetailPage() {
             <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
           </label>
         </div>
+        <label>
+          Google Maps link
+          <input
+            value={mapsLink}
+            onChange={(e) => setMapsLink(e.target.value)}
+            onPaste={onMapsPaste}
+            placeholder="https://maps.app.goo.gl/…"
+            inputMode="url"
+            autoComplete="off"
+          />
+        </label>
         <p className="muted">
-          Pasting a Google Maps link moves the pin to that place. “Use my location” is only your live GPS — do not use it if
-          you already pasted a shop link.
+          The address is the street text. Pasting a Google Maps link moves the pin to that place and is saved on its own.
+          “Use my location” is only your live GPS — do not use it if you already pasted a shop link.
         </p>
         <div className="toolbar">
           <button className="btn blue" type="button" onClick={() => findAddress()} disabled={finding}>
-            {finding ? "Reading map link…" : "Find address / map link"}
+            {finding ? "Reading map link…" : "Find on map"}
           </button>
           <button className="link" type="button" onClick={useMyLocation}>
             Use my location
@@ -437,7 +471,7 @@ export function LeadDetailPage() {
         ) : null}
         <MapView pins={pins} height={360} onPick={(lat, lng) => setPin({ lat, lng })} />
         <p className="muted">Click the map to move the pin, then save.</p>
-        <button className="btn green" type="button" onClick={saveLocation} disabled={saving || !edited || !pin}>
+        <button className="btn green" type="button" onClick={saveLocation} disabled={saving || !edited}>
           {saving ? "Saving…" : "Save location"}
         </button>
       </section>

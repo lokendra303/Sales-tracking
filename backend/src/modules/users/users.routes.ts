@@ -4,7 +4,7 @@ import { prisma } from "../../lib/prisma.js";
 import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
-import { hashPassword } from "../../lib/hash.js";
+import { passwordRecord } from "../../lib/hash.js";
 import { mobileSchema } from "../auth/auth.schema.js";
 import { RoleCode } from "@prisma/client";
 
@@ -48,6 +48,7 @@ function publicPerson(
     city: string | null;
     address: string | null;
     joiningDate: Date | null;
+    loginPassword?: string | null;
     status: string;
     roles: { role: { code: RoleCode } }[];
     teamMembers?: { team: { id: number; name: string } }[];
@@ -65,6 +66,7 @@ function publicPerson(
     city: user.city,
     address: user.address,
     joiningDate: user.joiningDate,
+    loginPassword: user.loginPassword ?? null,
     status: user.status,
     roles,
     isOwner: ownerId != null && user.id === ownerId,
@@ -176,7 +178,7 @@ usersRouter.post(
         city: body.city.trim(),
         address: body.address?.trim() || null,
         joiningDate: body.joiningDate ? new Date(`${body.joiningDate}T00:00:00`) : null,
-        passwordHash: await hashPassword(body.password),
+        ...(await passwordRecord(body.password)),
         roles: { create: { roleId: role.id } },
         teamMembers: body.teamId ? { create: { teamId: body.teamId } } : undefined,
       },
@@ -202,6 +204,7 @@ const updateUserSchema = z.object({
     .nullable()
     .optional(),
   status: z.enum(["ACTIVE", "DISABLED"]).optional(),
+  password: z.string().min(6, "Password must be at least 6 characters.").optional(),
 });
 
 usersRouter.put(
@@ -253,6 +256,8 @@ usersRouter.put(
       if (empTaken) throw badRequest("This employee ID is already in use.");
     }
 
+    const passwordFields = body.password ? await passwordRecord(body.password) : undefined;
+
     const updated = await prisma.user.update({
       where: { id: current.id },
       data: {
@@ -270,6 +275,7 @@ usersRouter.put(
               ? new Date(`${body.joiningDate}T00:00:00`)
               : null,
         status: body.status,
+        ...passwordFields,
       },
       include: personInclude,
     });

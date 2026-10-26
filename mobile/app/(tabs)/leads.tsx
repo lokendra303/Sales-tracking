@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
 import {
@@ -423,13 +423,19 @@ export default function LeadsScreen() {
                     }}
                   />
                   <Button title="WhatsApp" tone="outline" icon="logo-whatsapp" flex onPress={() => openWhatsApp(lead.phone)} />
-                  {lead.latitude != null || lead.address ? (
+                  {lead.latitude != null || lead.address || lead.mapsLink ? (
                     <Button
                       title="Map"
                       tone="outline"
                       icon="map-outline"
                       flex
-                      onPress={() => openNavigate(lead.latitude, lead.longitude, [lead.address, lead.city].filter(Boolean).join(", "))}
+                      onPress={() => {
+                        if (lead.latitude == null && lead.mapsLink) {
+                          Linking.openURL(lead.mapsLink).catch(() => undefined);
+                          return;
+                        }
+                        openNavigate(lead.latitude, lead.longitude, [lead.address, lead.city].filter(Boolean).join(", "));
+                      }}
                     />
                   ) : null}
                   {office && lead.approvalStatus === "PENDING" ? (

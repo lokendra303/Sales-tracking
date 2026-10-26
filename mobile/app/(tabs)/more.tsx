@@ -89,6 +89,9 @@ export default function MoreScreen() {
         ) : null}
       </Card>
       {office ? <Button title="Edit profile" tone="outline" onPress={() => router.push("/profile/edit" as Href)} /> : null}
+      {isSales(roles) ? (
+        <Button title="Change password" tone="outline" onPress={() => router.push("/profile/edit" as Href)} />
+      ) : null}
       {isManager(roles) ? (
         <Button
           title="Beats · assign many leads"

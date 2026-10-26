@@ -6,10 +6,18 @@ type Props = {
   placeholder?: string;
   required?: boolean;
   autoComplete?: string;
+  startVisible?: boolean;
 };
 
-export function PasswordField({ value, onChange, placeholder = "Password", required, autoComplete = "current-password" }: Props) {
-  const [visible, setVisible] = useState(false);
+export function PasswordField({
+  value,
+  onChange,
+  placeholder = "Password",
+  required,
+  autoComplete = "current-password",
+  startVisible = false,
+}: Props) {
+  const [visible, setVisible] = useState(startVisible);
 
   return (
     <div className="password-field">

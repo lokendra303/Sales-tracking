@@ -139,12 +139,10 @@ authRouter.post(
 authRouter.post(
   "/change-password",
   requireAuth,
-  requireRole("ADMIN", "MANAGER"),
   asyncHandler(async (req, res) => {
     const body = changePasswordSchema.parse(req.body);
     await authService.changeOwnPassword({
       userId: req.auth!.userId,
-      roles: req.auth!.roles,
       oldPassword: body.oldPassword,
       newPassword: body.newPassword,
     });

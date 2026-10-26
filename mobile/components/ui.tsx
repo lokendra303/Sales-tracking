@@ -218,13 +218,15 @@ export function PasswordField({
   value,
   onChangeText,
   placeholder = "Password",
+  startVisible = false,
 }: {
   label?: string;
   value: string;
   onChangeText: (value: string) => void;
   placeholder?: string;
+  startVisible?: boolean;
 }) {
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState(startVisible);
   return (
     <Field
       label={label}

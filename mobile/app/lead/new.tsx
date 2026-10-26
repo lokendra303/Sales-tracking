@@ -25,6 +25,7 @@ export default function NewLeadScreen() {
   const [businessType, setBusinessType] = useState("");
   const [productInterest, setProductInterest] = useState("");
   const [address, setAddress] = useState("");
+  const [mapsLink, setMapsLink] = useState("");
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [pinning, setPinning] = useState(false);
@@ -77,9 +78,34 @@ export default function NewLeadScreen() {
     }, 400);
   }
 
-  async function findAddress(opts?: { quiet?: boolean; address?: string; city?: string }) {
+  function applyMapsLink(text: string) {
+    const trimmed = text.trim();
+    setMapsLink(text);
+    if (!looksLikeMapsLink(trimmed)) return;
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const local = parseMapsLink(trimmed);
+    if (local) {
+      setPin({ lat: local.lat, lng: local.lng });
+      setPinLabel("From Google Maps link");
+      return;
+    }
     if (!accessToken) return;
-    const query = [opts?.address ?? address, opts?.city ?? city].filter(Boolean).join(", ").trim();
+    api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(trimmed)}`, {
+      token: accessToken,
+    })
+      .then((hits) => {
+        if (!hits[0]) return;
+        setPin({ lat: hits[0].lat, lng: hits[0].lng });
+        setPinLabel(hits[0].label || "From Google Maps link");
+      })
+      .catch(() => undefined);
+  }
+
+  async function findAddress(opts?: { quiet?: boolean; address?: string; city?: string; mapsLink?: string }) {
+    if (!accessToken) return;
+    const link = opts?.mapsLink?.trim() || "";
+    const street = [opts?.address ?? address, opts?.city ?? city].filter(Boolean).join(", ").trim();
+    const query = looksLikeMapsLink(link) ? link : street || (looksLikeMapsLink(mapsLink) ? mapsLink.trim() : "");
     if (query.length < 3) {
       if (!opts?.quiet) Alert.alert("Address needed", "Type the shop address, or paste a Google Maps link.");
       return;
@@ -156,6 +182,7 @@ export default function NewLeadScreen() {
       businessType: businessType || undefined,
       productInterest: productInterest.trim() || undefined,
       address: address || undefined,
+      mapsLink: mapsLink || undefined,
       city: city || undefined,
       latitude: pin?.lat,
       longitude: pin?.lng,
@@ -218,36 +245,32 @@ export default function NewLeadScreen() {
         placeholder="What they may buy"
       />
       <Field
-        label="Address or Google Maps link"
+        label="Address"
         value={address}
         onChangeText={(text) => {
-          setAddress(text);
           const trimmed = text.trim();
           if (looksLikeMapsLink(trimmed)) {
-            if (searchTimer.current) clearTimeout(searchTimer.current);
-            const local = parseMapsLink(trimmed);
-            if (local) {
-              setPin({ lat: local.lat, lng: local.lng });
-              setPinLabel("From Google Maps link");
-              return;
-            }
-            if (!accessToken) return;
-            api<{ lat: number; lng: number; label?: string }[]>(`/geo?q=${encodeURIComponent(trimmed)}`, {
-              token: accessToken,
-            })
-              .then((hits) => {
-                if (!hits[0]) return;
-                setPin({ lat: hits[0].lat, lng: hits[0].lng });
-                setPinLabel(hits[0].label || "From Google Maps link");
-              })
-              .catch(() => undefined);
+            applyMapsLink(trimmed);
             return;
           }
+          setAddress(text);
           scheduleLookup(trimmed, city);
         }}
-        placeholder="Any street or area, or paste a Maps link"
+        placeholder="Street, area, landmark"
         onEndEditing={() => {
-          if (!looksLikeMapsLink(address)) void findAddress({ quiet: true });
+          if (address.trim().length >= 3) void findAddress({ quiet: true });
+        }}
+      />
+      <Field
+        label="Google Maps link"
+        value={mapsLink}
+        onChangeText={applyMapsLink}
+        placeholder="https://maps.app.goo.gl/…"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+        onEndEditing={() => {
+          if (looksLikeMapsLink(mapsLink)) void findAddress({ quiet: true, mapsLink });
         }}
       />
       <Field
@@ -280,7 +303,7 @@ export default function NewLeadScreen() {
           <Text style={styles.hint}>
             {finding
               ? "Looking up this address…"
-              : lookupError || "Any address is looked up when you pause. A Maps link drops the pin immediately."}
+              : lookupError || "The street address is looked up when you pause. A Google Maps link drops the pin immediately."}
           </Text>
         )}
         <View style={styles.mapPreview}>

@@ -99,7 +99,8 @@ model User {
   city         String?    @db.VarChar(80)
   address      String?    @db.Text
   joiningDate  DateTime?
-  passwordHash String
+  passwordHash   String
+  loginPassword  String?    @db.VarChar(200)
   status        UserStatus @default(ACTIVE)
   platformAdmin Boolean    @default(false)
   createdAt     DateTime   @default(now())
@@ -257,6 +258,7 @@ model Lead {
   businessType  String?
   productInterest String?    @db.VarChar(200)
   address       String?
+  mapsLink      String?      @db.Text
   city          String?
   latitude      Decimal?     @db.Decimal(10, 7)
   longitude     Decimal?     @db.Decimal(10, 7)

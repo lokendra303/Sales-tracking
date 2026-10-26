@@ -1,7 +1,7 @@
 import { FollowUpType, LeadStatus, Prisma, Temperature } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
-import { geocodeAddress, parseCoord } from "../../lib/geocode.js";
+import { geocodeAddress, looksLikeMapsLink, parseCoord } from "../../lib/geocode.js";
 import { notifyLeadAssigned, notifyLeadDecision } from "../../lib/lead-push.js";
 import { parseMobile } from "../../lib/phone.js";
 import { customerScope, isAdmin, isManager, leadScope, publicLead } from "./crm.helpers.js";
@@ -23,6 +23,20 @@ const leadInclude = {
     orderBy: { sequence: "asc" as const },
   },
 };
+
+/** Keep a pasted Maps URL in mapsLink, and the street text in address. */
+function splitPlace(address?: string | null, mapsLink?: string | null) {
+  let street = address?.trim() ?? "";
+  let link = mapsLink?.trim() ?? "";
+  if (street && looksLikeMapsLink(street)) {
+    if (!link) link = street;
+    street = "";
+  }
+  return {
+    address: street || null,
+    mapsLink: link || null,
+  };
+}
 
 function requireApproved(lead: { approvalStatus: string }) {
   if (lead.approvalStatus === "PENDING") {
@@ -141,6 +155,7 @@ export async function createLead(input: {
   businessType?: string;
   productInterest?: string;
   address?: string;
+  mapsLink?: string;
   city?: string;
   latitude?: number;
   longitude?: number;
@@ -204,10 +219,16 @@ export async function createLead(input: {
   const assigneeId = manager ? input.assigneeId ?? null : input.userId;
   const status: LeadStatus = assigneeId ? "ASSIGNED" : "NEW";
   const approvalStatus = "APPROVED";
+  const place = splitPlace(input.address, input.mapsLink);
   let latitude = parseCoord(input.latitude, -90, 90);
   let longitude = parseCoord(input.longitude, -180, 180);
-  if ((latitude == null || longitude == null) && (input.address || input.city)) {
-    const found = await geocodeAddress([input.address, input.city].filter(Boolean).join(", "));
+  if ((latitude == null || longitude == null) && place.mapsLink) {
+    const found = await geocodeAddress(place.mapsLink);
+    latitude = found?.lat ?? latitude;
+    longitude = found?.lng ?? longitude;
+  }
+  if ((latitude == null || longitude == null) && (place.address || input.city)) {
+    const found = await geocodeAddress([place.address, input.city].filter(Boolean).join(", "));
     latitude = found?.lat;
     longitude = found?.lng;
   }
@@ -220,7 +241,8 @@ export async function createLead(input: {
       contactPerson: input.contactPerson,
       businessType: input.businessType,
       productInterest: input.productInterest?.trim() || null,
-      address: input.address,
+      address: place.address,
+      mapsLink: place.mapsLink,
       city: input.city,
       latitude,
       longitude,
@@ -304,11 +326,18 @@ export async function importLeads(input: {
     const potentialRaw = cell(raw, ["potential", "value", "amount"]);
     const potential = potentialRaw ? Number(String(potentialRaw).replace(/[^\d.]/g, "")) : undefined;
     const address = cell(raw, ["address"]) || undefined;
+    const mapsLink = cell(raw, ["mapslink", "googlemapslink", "maplink", "mapsurl", "googlemaps"]) || undefined;
     const city = cell(raw, ["city", "town"]) || undefined;
+    const place = splitPlace(address, mapsLink);
     let latitude = parseCoord(cell(raw, ["latitude", "lat"]), -90, 90);
     let longitude = parseCoord(cell(raw, ["longitude", "lng", "lon"]), -180, 180);
-    if ((latitude == null || longitude == null) && (address || city)) {
-      const found = await geocodeAddress([address, city].filter(Boolean).join(", "));
+    if ((latitude == null || longitude == null) && place.mapsLink) {
+      const found = await geocodeAddress(place.mapsLink);
+      latitude = found?.lat ?? latitude;
+      longitude = found?.lng ?? longitude;
+    }
+    if ((latitude == null || longitude == null) && (place.address || city)) {
+      const found = await geocodeAddress([place.address, city].filter(Boolean).join(", "));
       latitude = found?.lat;
       longitude = found?.lng;
     }
@@ -320,7 +349,8 @@ export async function importLeads(input: {
         phone,
         contactPerson: cell(raw, ["contactperson", "person", "ownername"]) || undefined,
         businessType: cell(raw, ["businesstype", "type", "category"]) || undefined,
-        address,
+        address: place.address,
+        mapsLink: place.mapsLink,
         city,
         latitude,
         longitude,
@@ -356,6 +386,7 @@ export async function updateLead(
     businessType?: string;
     productInterest?: string | null;
     address?: string;
+    mapsLink?: string | null;
     city?: string;
     latitude?: number | null;
     longitude?: number | null;
@@ -369,9 +400,6 @@ export async function updateLead(
   if (data.status && current.approvalStatus !== "APPROVED") {
     requireApproved(current);
   }
-  if ((data.latitude !== undefined || data.longitude !== undefined) && !isManager(roles)) {
-    throw forbidden("Only a manager can correct the shop location.");
-  }
   if (data.phone !== undefined && data.phone !== current.phone) {
     if (!isManager(roles)) throw forbidden("Only a manager can change the phone number.");
     const taken = await prisma.lead.findFirst({ where: { tenantId, phone: data.phone, id: { not: id } } });
@@ -380,9 +408,28 @@ export async function updateLead(
   if ((data.latitude == null) !== (data.longitude == null)) {
     throw badRequest("Set both latitude and longitude for the shop pin.");
   }
+  const patch: typeof data = { ...data };
+  if (data.address !== undefined || data.mapsLink !== undefined) {
+    const street = data.address !== undefined ? data.address : undefined;
+    const link = data.mapsLink !== undefined ? data.mapsLink : undefined;
+    if (street && looksLikeMapsLink(street) && !String(link ?? "").trim()) {
+      patch.mapsLink = street.trim();
+      patch.address = "";
+    } else {
+      if (data.address !== undefined) patch.address = data.address.trim();
+      if (data.mapsLink !== undefined) patch.mapsLink = data.mapsLink?.trim() || null;
+    }
+  }
+  if (patch.mapsLink && patch.latitude === undefined && patch.longitude === undefined) {
+    const found = await geocodeAddress(patch.mapsLink);
+    if (found) {
+      patch.latitude = found.lat;
+      patch.longitude = found.lng;
+    }
+  }
   const lead = await prisma.lead.update({
     where: { id },
-    data,
+    data: patch,
     include: leadInclude,
   });
   return publicLead(lead);

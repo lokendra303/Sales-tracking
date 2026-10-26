@@ -32,8 +32,14 @@ export default function EditProfileScreen() {
 
   if (!office) {
     return (
-      <Screen header={<ScreenHeader title="Edit profile" back align="center" fallback="/more" />}>
-        <Text style={typo.muted}>Ask your manager to update your profile details.</Text>
+      <Screen keyboard header={<ScreenHeader title="Change password" back align="center" fallback="/more" />}>
+        <Text style={typo.muted}>
+          Use your current password, then set a new one. Your manager sees the new password on the desk Team page.
+        </Text>
+        <PasswordField label="Current password" value={oldPassword} onChangeText={setOldPassword} />
+        <PasswordField label="New password" value={newPassword} onChangeText={setNewPassword} />
+        <PasswordField label="Confirm new password" value={confirmPassword} onChangeText={setConfirmPassword} />
+        <Button title="Update password" tone="green" onPress={savePassword} loading={busy} />
       </Screen>
     );
   }

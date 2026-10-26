@@ -17,6 +17,7 @@ type Lead = {
   assigneeId: number | null;
   assigneeName: string | null;
   address: string | null;
+  mapsLink?: string | null;
   city: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -44,6 +45,7 @@ export function LeadsPage() {
   const [phone, setPhone] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [address, setAddress] = useState("");
+  const [mapsLink, setMapsLink] = useState("");
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [assigneeId, setAssigneeId] = useState("");
@@ -76,6 +78,7 @@ export function LeadsPage() {
     setPhone("");
     setContactPerson("");
     setAddress("");
+    setMapsLink("");
     setCity("");
     setPin(null);
     setAssigneeId("");
@@ -83,7 +86,8 @@ export function LeadsPage() {
 
   async function findAddress(override?: string, quiet = false) {
     if (!accessToken) return;
-    const query = (override ?? [address, city].filter(Boolean).join(", ")).trim();
+    const typed = [address, city].filter(Boolean).join(", ").trim();
+    const query = (override ?? (typed || mapsLink.trim())).trim();
     if (query.length < 3) {
       if (!quiet) setError("Type the shop address, or paste a Google Maps link.");
       return;
@@ -126,19 +130,34 @@ export function LeadsPage() {
 
   useEffect(() => {
     if (!adding || !accessToken) return;
+    const link = mapsLink.trim();
+    if (looksLikeMapsLink(link)) {
+      const timer = window.setTimeout(() => {
+        void findAddress(link, true);
+      }, 400);
+      return () => window.clearTimeout(timer);
+    }
     const query = [address, city].filter(Boolean).join(", ").trim();
-    if (looksLikeMapsLink(query) || query.length < 5) return;
+    if (query.length < 5) return;
     const timer = window.setTimeout(() => {
       void findAddress(query, true);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [adding, address, city, accessToken]);
+  }, [adding, address, city, mapsLink, accessToken]);
+
+  function onMapsPaste(event: ClipboardEvent<HTMLInputElement>) {
+    const pasted = event.clipboardData.getData("text").trim();
+    if (!looksLikeMapsLink(pasted)) return;
+    event.preventDefault();
+    setMapsLink(pasted);
+    void findAddress(pasted);
+  }
 
   function onAddressPaste(event: ClipboardEvent<HTMLInputElement>) {
     const pasted = event.clipboardData.getData("text").trim();
     if (!looksLikeMapsLink(pasted)) return;
     event.preventDefault();
-    setAddress(pasted);
+    setMapsLink(pasted);
     void findAddress(pasted);
   }
 
@@ -168,6 +187,7 @@ export function LeadsPage() {
           phone,
           contactPerson: contactPerson || undefined,
           address: address || undefined,
+          mapsLink: mapsLink || undefined,
           city: city || undefined,
           latitude: pin?.lat,
           longitude: pin?.lng,
@@ -308,12 +328,12 @@ export function LeadsPage() {
               </select>
             </label>
             <label>
-              Address or Google Maps link
+              Address
               <input
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 onPaste={onAddressPaste}
-                placeholder="Any street, area, or a Google Maps link"
+                placeholder="Street, area, landmark"
               />
             </label>
             <label>
@@ -321,9 +341,20 @@ export function LeadsPage() {
               <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
             </label>
           </div>
+          <label>
+            Google Maps link
+            <input
+              value={mapsLink}
+              onChange={(e) => setMapsLink(e.target.value)}
+              onPaste={onMapsPaste}
+              placeholder="https://maps.app.goo.gl/…"
+              inputMode="url"
+              autoComplete="off"
+            />
+          </label>
           <div className="toolbar">
             <button className="btn blue" type="button" onClick={() => findAddress()}>
-              Find address / map link
+              Find on map
             </button>
             <button className="link" type="button" onClick={useMyLocation}>
               Use my location
@@ -350,6 +381,7 @@ export function LeadsPage() {
       <div className="list">
         {leads.map((lead) => {
           const place = [lead.address, lead.city].filter(Boolean).join(", ");
+          const placeLine = place || (lead.mapsLink ? "Map link saved" : "No address");
           const hasPin = lead.latitude != null && lead.longitude != null;
           const beatLine =
             lead.beats?.length
@@ -365,7 +397,8 @@ export function LeadsPage() {
                   {beatLine}
                 </div>
                 <div className="muted">
-                  {lead.phone} · {place || "No address"} · {lead.assigneeName || "Unassigned"}
+                  {lead.phone} · {placeLine}
+                  {place && lead.mapsLink ? " · Map link" : ""} · {lead.assigneeName || "Unassigned"}
                   {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}
                   {hasPin ? " · Map pin" : ""}
                 </div>
@@ -413,17 +446,19 @@ export function LeadsPage() {
                 <Link className="btn blue" to={`/leads/${lead.id}`}>
                   Edit
                 </Link>
-                {hasPin || place ? (
+                {hasPin || place || lead.mapsLink ? (
                   <a
                     href={
-                      mapsUrl({
-                        latitude: lead.latitude,
-                        longitude: lead.longitude,
-                        address: lead.address,
-                        city: lead.city,
-                        name: lead.name,
-                        mode: "dir",
-                      }) ?? undefined
+                      (lead.latitude == null && lead.mapsLink
+                        ? lead.mapsLink
+                        : mapsUrl({
+                            latitude: lead.latitude,
+                            longitude: lead.longitude,
+                            address: lead.address,
+                            city: lead.city,
+                            name: lead.name,
+                            mode: "dir",
+                          })) ?? undefined
                     }
                     target="_blank"
                     rel="noreferrer"

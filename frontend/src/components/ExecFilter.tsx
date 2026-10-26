@@ -37,29 +37,24 @@ export function ExecFilter({
   includeUnassigned?: boolean;
 }) {
   return (
-    <div className="chips" role="tablist" aria-label="Sales executive">
-      <button type="button" className={value === "all" ? "chip on" : "chip"} onClick={() => onChange("all")}>
-        All executives
-      </button>
-      {includeUnassigned ? (
-        <button
-          type="button"
-          className={value === "unassigned" ? "chip on" : "chip"}
-          onClick={() => onChange("unassigned")}
-        >
-          Unassigned
-        </button>
-      ) : null}
+    <select
+      className="exec-select"
+      aria-label="Sales executive"
+      value={value === "all" ? "all" : String(value)}
+      onChange={(event) => {
+        const raw = event.target.value;
+        if (raw === "all") onChange("all");
+        else if (raw === "unassigned") onChange("unassigned");
+        else onChange(Number(raw));
+      }}
+    >
+      <option value="all">All executives</option>
+      {includeUnassigned ? <option value="unassigned">Unassigned</option> : null}
       {people.map((person) => (
-        <button
-          key={person.id}
-          type="button"
-          className={value === person.id ? "chip on" : "chip"}
-          onClick={() => onChange(person.id)}
-        >
+        <option key={person.id} value={person.id}>
           {person.name}
-        </button>
+        </option>
       ))}
-    </div>
+    </select>
   );
 }

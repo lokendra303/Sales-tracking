@@ -16,12 +16,11 @@ type Person = {
   city: string | null;
   address: string | null;
   joiningDate: string | null;
+  loginPassword?: string | null;
   status: string;
   roles: string[];
   isOwner?: boolean;
 };
-
-type AccountKind = "SALES_EXECUTIVE" | "MANAGER";
 
 type FormState = {
   name: string;
@@ -34,7 +33,6 @@ type FormState = {
   address: string;
   joiningDate: string;
   status: "ACTIVE" | "DISABLED";
-  role: AccountKind;
 };
 
 const emptyForm: FormState = {
@@ -48,7 +46,6 @@ const emptyForm: FormState = {
   address: "",
   joiningDate: "",
   status: "ACTIVE",
-  role: "SALES_EXECUTIVE",
 };
 
 function dayValue(iso: string | null) {
@@ -66,7 +63,8 @@ export function TeamPage() {
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const iAmOwner = Boolean(user?.isOwner);
-  const editingPerson = editingId ? people.find((p) => p.id === editingId) : null;
+  const salesPeople = people.filter((person) => person.roles.includes("SALES_EXECUTIVE") && !person.roles.includes("MANAGER"));
+  const editingPerson = editingId ? salesPeople.find((p) => p.id === editingId) : null;
   const canToggleStatus =
     Boolean(editingPerson) &&
     editingPerson!.id !== user?.id &&
@@ -95,14 +93,13 @@ export function TeamPage() {
       name: person.name,
       phone: person.phone,
       email: person.email ?? "",
-      password: "",
+      password: person.loginPassword ?? "",
       employeeId: person.employeeId ?? "",
       designation: person.designation ?? "",
       city: person.city ?? "",
       address: person.address ?? "",
       joiningDate: dayValue(person.joiningDate),
       status: person.status === "DISABLED" ? "DISABLED" : "ACTIVE",
-      role: person.roles.includes("MANAGER") ? "MANAGER" : "SALES_EXECUTIVE",
     });
   }
 
@@ -118,6 +115,12 @@ export function TeamPage() {
     if (!accessToken) return;
     setError("");
     setIssued("");
+    if (form.password.trim() && form.password.trim().length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    const nextPassword = form.password.trim();
+    const passwordChanged = nextPassword !== (editingPerson?.loginPassword ?? "").trim();
     setBusy(true);
     try {
       if (editingId) {
@@ -134,9 +137,10 @@ export function TeamPage() {
             address: form.address || null,
             joiningDate: form.joiningDate || null,
             ...(canToggleStatus ? { status: form.status } : {}),
+            ...(passwordChanged && nextPassword ? { password: nextPassword } : {}),
           }),
         });
-        setIssued("Details updated.");
+        setIssued(passwordChanged && nextPassword ? `Details updated. Password is now ${nextPassword}.` : "Details updated.");
         cancelEdit();
       } else {
         await api("/users", {
@@ -152,14 +156,10 @@ export function TeamPage() {
             city: form.city,
             address: form.address || undefined,
             joiningDate: form.joiningDate || undefined,
-            role: form.role,
+            role: "SALES_EXECUTIVE",
           }),
         });
-        setIssued(
-          form.role === "MANAGER"
-            ? `Desk login ready: give them ${form.phone} / ${form.password}. They use SalesTrack Desk with their own login — not yours.`
-            : `Give this employee ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`,
-        );
+        setIssued(`Give this salesperson ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`);
         setForm(emptyForm);
         setShowMore(false);
       }
@@ -175,57 +175,10 @@ export function TeamPage() {
     <div className="page">
       <p className="kicker">Sales team</p>
       <h1>Team</h1>
-      <p className="muted">
-        Add field executives for the phone app, or choose <strong>Desk login</strong> so other people manage the same
-        company portal with their own mobile + password. The main manager (registered with email)
-        {iAmOwner ? " — you —" : ""} can turn desk helpers Off anytime.
-      </p>
+      <p className="muted">Add salespeople for the phone app. They sign in with their mobile number and password.</p>
 
       <form className="card form wide form-compact" onSubmit={onSubmit}>
-        <h2>{editingId ? "Edit person" : "Add person"}</h2>
-        {!editingId ? (
-          <fieldset className="account-kind">
-            <legend>Account type *</legend>
-            <label className="radio-row">
-              <input
-                type="radio"
-                name="accountKind"
-                checked={form.role === "SALES_EXECUTIVE"}
-                onChange={() => {
-                  setField("role", "SALES_EXECUTIVE");
-                  if (!form.designation || form.designation === "Desk assistant") {
-                    setField("designation", "Sales Executive");
-                  }
-                }}
-              />
-              <span>
-                <strong>Field (phone app)</strong>
-                <span className="muted"> — visits, beats, shop photos</span>
-              </span>
-            </label>
-            <label className="radio-row">
-              <input
-                type="radio"
-                name="accountKind"
-                checked={form.role === "MANAGER"}
-                onChange={() => {
-                  setField("role", "MANAGER");
-                  if (!form.designation || form.designation === "Sales Executive") {
-                    setField("designation", "Desk assistant");
-                  }
-                }}
-              />
-              <span>
-                <strong>Desk login</strong>
-                <span className="muted"> — web portal + app, own credentials</span>
-              </span>
-            </label>
-          </fieldset>
-        ) : (
-          <p className="muted">
-            Account type: {form.role === "MANAGER" ? "Desk login" : "Field (phone app)"} (cannot change after create)
-          </p>
-        )}
+        <h2>{editingId ? "Edit salesperson" : "Add salesperson"}</h2>
         <div className="grid-3">
           <label>
             Full name *
@@ -264,32 +217,44 @@ export function TeamPage() {
             <input value={form.city} onChange={(e) => setField("city", e.target.value)} required />
           </label>
           {editingId ? (
-            canToggleStatus ? (
+            <>
+              {canToggleStatus ? (
+                <label>
+                  Status
+                  <select value={form.status} onChange={(e) => setField("status", e.target.value as FormState["status"])}>
+                    <option value="ACTIVE">Active</option>
+                    <option value="DISABLED">Off</option>
+                  </select>
+                </label>
+              ) : (
+                <label>
+                  Status
+                  <input
+                    value={
+                      editingPerson?.isOwner
+                        ? "Main manager (cannot turn off)"
+                        : form.status === "ACTIVE"
+                          ? "Active"
+                          : "Off"
+                    }
+                    disabled
+                  />
+                </label>
+              )}
               <label>
-                Status
-                <select value={form.status} onChange={(e) => setField("status", e.target.value as FormState["status"])}>
-                  <option value="ACTIVE">Active</option>
-                  <option value="DISABLED">Off</option>
-                </select>
-              </label>
-            ) : (
-              <label>
-                Status
-                <input
-                  value={
-                    editingPerson?.isOwner
-                      ? "Main manager (cannot turn off)"
-                      : form.status === "ACTIVE"
-                        ? "Active"
-                        : "Off"
-                  }
-                  disabled
+                Current password
+                <PasswordField
+                  value={form.password}
+                  onChange={(value) => setField("password", value)}
+                  placeholder=""
+                  autoComplete="off"
+                  startVisible
                 />
               </label>
-            )
+            </>
           ) : (
             <label>
-              {form.role === "MANAGER" ? "Desk password *" : "App password *"}
+              App password *
               <PasswordField value={form.password} onChange={(value) => setField("password", value)} required autoComplete="new-password" />
             </label>
           )}
@@ -313,7 +278,7 @@ export function TeamPage() {
 
         <div className="actions">
           <button className="btn green" disabled={busy}>
-            {busy ? "Saving…" : editingId ? "Save changes" : form.role === "MANAGER" ? "Add desk login" : "Add field employee"}
+            {busy ? "Saving…" : editingId ? "Save changes" : "Add salesperson"}
           </button>
           {editingId ? (
             <button type="button" className="btn" onClick={cancelEdit}>
@@ -330,7 +295,6 @@ export function TeamPage() {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Type</th>
               <th>Employee ID</th>
               <th>Phone</th>
               <th>City</th>
@@ -339,16 +303,11 @@ export function TeamPage() {
             </tr>
           </thead>
           <tbody>
-            {people.map((item) => {
-              const desk = item.roles.includes("MANAGER");
-              return (
+            {salesPeople.map((item) => (
               <tr key={item.id}>
                 <td>
                   <strong>{item.name}</strong>
                   <div className="muted">{item.designation || roleLabel(item.roles)}</div>
-                </td>
-                <td>
-                  {item.isOwner ? "Main manager" : roleLabel(item.roles)}
                 </td>
                 <td>{item.employeeId || "—"}</td>
                 <td>{item.phone}</td>
@@ -358,18 +317,13 @@ export function TeamPage() {
                   <button type="button" className="link" onClick={() => startEdit(item)}>
                     Edit
                   </button>
-                  {!desk ? (
-                    <>
-                      {" · "}
-                      <Link to={`/leads?assigneeId=${item.id}`}>Leads</Link>
-                      {" · "}
-                      <Link to={`/visits?userId=${item.id}`}>Visits</Link>
-                    </>
-                  ) : null}
+                  {" · "}
+                  <Link to={`/leads?assigneeId=${item.id}`}>Leads</Link>
+                  {" · "}
+                  <Link to={`/visits?userId=${item.id}`}>Visits</Link>
                 </td>
               </tr>
-            );
-            })}
+            ))}
           </tbody>
         </table>
       </div>

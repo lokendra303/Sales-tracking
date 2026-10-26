@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
-import { Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
+import { Button, Chip, Field, PasswordField, Screen, ScreenHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { api, type TeamPerson } from "@/lib/api";
 import { isManager, roleLabel } from "@/lib/roles";
@@ -26,6 +26,7 @@ export default function EditUserScreen() {
   const [address, setAddress] = useState("");
   const [joiningDate, setJoiningDate] = useState("");
   const [status, setStatus] = useState<"ACTIVE" | "DISABLED">("ACTIVE");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -54,6 +55,7 @@ export default function EditUserScreen() {
         setAddress(row.address ?? "");
         setJoiningDate(dayValue(row.joiningDate));
         setStatus(row.status === "DISABLED" ? "DISABLED" : "ACTIVE");
+        setPassword(row.loginPassword ?? "");
       })
       .catch(() => setPerson(null))
       .finally(() => setLoading(false));
@@ -63,6 +65,12 @@ export default function EditUserScreen() {
 
   async function save() {
     if (!accessToken || !id || !manager) return;
+    const nextPassword = password.trim();
+    const passwordChanged = nextPassword !== (person?.loginPassword ?? "").trim();
+    if (passwordChanged && nextPassword.length < 6) {
+      Alert.alert("Weak password", "Use at least 6 characters, or leave the password as it is.");
+      return;
+    }
     setSaving(true);
     try {
       await api(`/users/${id}`, {
@@ -78,11 +86,18 @@ export default function EditUserScreen() {
           address: address || null,
           joiningDate: joiningDate || null,
           ...(canToggleStatus ? { status } : {}),
+          ...(passwordChanged && nextPassword ? { password: nextPassword } : {}),
         }),
       });
       Alert.alert(
         "Saved",
-        isMainOwner ? "Main manager details updated." : deskLogin ? "Desk login details updated." : "Field employee details updated.",
+        passwordChanged && nextPassword
+          ? `Details updated. Password is now ${nextPassword}.`
+          : isMainOwner
+            ? "Main manager details updated."
+            : deskLogin
+              ? "Desk login details updated."
+              : "Field employee details updated.",
       );
       router.replace("/team");
     } catch (err) {
@@ -123,6 +138,13 @@ export default function EditUserScreen() {
       <Field label="Email *" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
       <Field label="Designation *" value={designation} onChangeText={setDesignation} autoCapitalize="words" />
       <Field label="City *" value={city} onChangeText={setCity} autoCapitalize="words" />
+      <PasswordField
+        label="Password"
+        value={password}
+        onChangeText={setPassword}
+        placeholder="Not set yet"
+        startVisible
+      />
       <Field label="Joining date (YYYY-MM-DD)" value={joiningDate} onChangeText={setJoiningDate} autoCapitalize="none" />
       <Field label="Address" value={address} onChangeText={setAddress} multiline />
       {canToggleStatus ? (

@@ -33,6 +33,7 @@ export function publicLead(lead: {
   businessType: string | null;
   productInterest?: string | null;
   address: string | null;
+  mapsLink?: string | null;
   city: string | null;
   latitude?: unknown;
   longitude?: unknown;
@@ -77,6 +78,7 @@ export function publicLead(lead: {
     businessType: lead.businessType,
     productInterest: lead.productInterest ?? null,
     address: lead.address,
+    mapsLink: lead.mapsLink ?? null,
     city: lead.city,
     latitude: lead.latitude != null ? Number(lead.latitude) : null,
     longitude: lead.longitude != null ? Number(lead.longitude) : null,
