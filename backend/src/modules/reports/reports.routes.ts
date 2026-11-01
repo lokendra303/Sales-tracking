@@ -46,7 +46,9 @@ reportsRouter.get(
   "/reports/summary",
   asyncHandler(async (req, res) => {
     const userId = req.query.userId ? Number(req.query.userId) : undefined;
-    const data = await reports.personSummary(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, userId);
+    const from = typeof req.query.from === "string" ? req.query.from : undefined;
+    const to = typeof req.query.to === "string" ? req.query.to : undefined;
+    const data = await reports.personSummary(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, userId, { from, to });
     res.json({ success: true, data });
   }),
 );
@@ -63,7 +65,9 @@ reportsRouter.get(
   "/reports/funnel",
   asyncHandler(async (req, res) => {
     const days = Number(req.query.days ?? 30);
-    const data = await reports.funnel(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, days);
+    const from = typeof req.query.from === "string" ? req.query.from : undefined;
+    const to = typeof req.query.to === "string" ? req.query.to : undefined;
+    const data = await reports.funnel(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, days, { from, to });
     res.json({ success: true, data });
   }),
 );

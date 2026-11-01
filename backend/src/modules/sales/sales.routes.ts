@@ -37,7 +37,9 @@ salesRouter.get(
   asyncHandler(async (req, res) => {
     const days = Number(req.query.days ?? 30);
     const forUserId = req.query.userId ? Number(req.query.userId) : undefined;
-    const data = await sales.listSales(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, days, forUserId);
+    const from = typeof req.query.from === "string" ? req.query.from : undefined;
+    const to = typeof req.query.to === "string" ? req.query.to : undefined;
+    const data = await sales.listSales(req.auth!.tenantId, req.auth!.userId, req.auth!.roles, days, forUserId, { from, to });
     res.json({ success: true, data });
   }),
 );

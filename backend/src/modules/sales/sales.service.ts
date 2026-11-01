@@ -4,6 +4,7 @@ import type { RoleCode } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { isManager } from "../crm/crm.helpers.js";
+import { parseDay } from "../beat/beat.helpers.js";
 import { asNumber } from "../visits/visits.helpers.js";
 
 function saleScope(tenantId: number, userId: number, roles: RoleCode[]) {
@@ -44,11 +45,33 @@ export function publicSale(row: {
   };
 }
 
-export async function listSales(tenantId: number, userId: number, roles: RoleCode[], days = 30, forUserId?: number) {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - Math.max(1, days));
-  start.setHours(0, 0, 0, 0);
+export async function listSales(
+  tenantId: number,
+  userId: number,
+  roles: RoleCode[],
+  days = 30,
+  forUserId?: number,
+  range?: { from?: string; to?: string },
+) {
+  let start: Date;
+  let end: Date;
+  if (range?.from) {
+    start = parseDay(range.from).start;
+    end = parseDay(range.to || range.from).end;
+    if (end.getTime() < start.getTime()) {
+      const nextStart = parseDay(range.to || range.from).start;
+      end = parseDay(range.from).end;
+      start = nextStart;
+    }
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+    if (end.getTime() > todayEnd.getTime()) end = todayEnd;
+  } else {
+    end = new Date();
+    start = new Date();
+    start.setDate(start.getDate() - Math.max(1, days));
+    start.setHours(0, 0, 0, 0);
+  }
   const scope = isManager(roles) && forUserId ? { tenantId, userId: forUserId } : saleScope(tenantId, userId, roles);
   const rows = await prisma.sale.findMany({
     where: {

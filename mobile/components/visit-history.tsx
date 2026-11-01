@@ -1,14 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { BarChart, MixBar, ProgressRing, dayKey, lastNDays } from "@/components/progress-charts";
 import { ProofThumb } from "@/components/proof-thumb";
-import { Badge, Card, Chip, EmptyState } from "@/components/ui";
+import { Badge, Card, EmptyState } from "@/components/ui";
 import { api, type Visit } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { isoDay, money, when } from "@/lib/format";
-import { colors, typo } from "@/lib/theme";
+import { colors, shadow, typo } from "@/lib/theme";
 
 type Period = "day" | "7" | "30" | "range";
 type StatusFilter = "all" | "completed" | "missed" | "in_progress";
@@ -53,6 +53,129 @@ function dayLabel(day: Date) {
 
 function rangeLabel(day: Date) {
   return day.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const weekDays = ["S", "M", "T", "W", "T", "F", "S"];
+
+function MiniCalendar({
+  value,
+  maximum,
+  onPick,
+}: {
+  value: Date;
+  maximum: Date;
+  onPick: (date: Date) => void;
+}) {
+  const [month, setMonth] = useState(() => new Date(value.getFullYear(), value.getMonth(), 1));
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const cells = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, index) => index + 1)];
+  const maxMonth = new Date(maximum.getFullYear(), maximum.getMonth(), 1).getTime();
+  const selectedKey = isoDay(value);
+  const todayKey = isoDay();
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const node = typeof document !== "undefined" ? document.getElementById("custom-calendar") : null;
+      node?.scrollIntoView({ block: "nearest" });
+    }, 40);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <View nativeID="custom-calendar" style={styles.calendar}>
+      <View style={styles.calHead}>
+        <Pressable
+          onPress={() => setMonth(new Date(year, monthIndex - 1, 1))}
+          hitSlop={8}
+          accessibilityLabel="Previous month"
+        >
+          <Text style={styles.calArrow}>‹</Text>
+        </Pressable>
+        <Text style={styles.calTitle}>{month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</Text>
+        <Pressable
+          onPress={() => setMonth(new Date(year, monthIndex + 1, 1))}
+          disabled={month.getTime() >= maxMonth}
+          hitSlop={8}
+          accessibilityLabel="Next month"
+        >
+          <Text style={[styles.calArrow, month.getTime() >= maxMonth && styles.calArrowOff]}>›</Text>
+        </Pressable>
+      </View>
+      <View style={styles.calGrid}>
+        {weekDays.map((label, index) => (
+          <Text key={`w-${index}`} style={styles.calWeek}>
+            {label}
+          </Text>
+        ))}
+        {cells.map((day, index) => {
+          if (!day) return <View key={`e-${index}`} style={styles.calCell} />;
+          const date = new Date(year, monthIndex, day);
+          const key = isoDay(date);
+          const disabled = startOfDay(date).getTime() > startOfDay(maximum).getTime();
+          const selected = key === selectedKey;
+          return (
+            <Pressable
+              key={key}
+              disabled={disabled}
+              onPress={() => onPick(date)}
+              style={[styles.calCell, selected && styles.calCellOn]}
+            >
+              <Text style={[styles.calDay, key === todayKey && styles.calToday, selected && styles.calDayOn, disabled && styles.calDayOff]}>
+                {day}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function DropMenu({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((option) => option.id === value)?.label ?? options[0]?.label ?? "";
+  return (
+    <View style={[styles.menu, open && styles.menuOpen]}>
+      <Pressable style={styles.menuBtn} onPress={() => setOpen((on) => !on)} accessibilityRole="button">
+        <Text style={styles.menuText} numberOfLines={1}>
+          {current}
+        </Text>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color={colors.muted} />
+      </Pressable>
+      {open ? (
+        <View style={styles.menuList}>
+          {options.map((option) => {
+            const on = option.id === value;
+            return (
+              <Pressable
+                key={option.id}
+                style={[styles.menuItem, on && styles.menuItemOn]}
+                onPress={() => {
+                  onChange(option.id);
+                  setOpen(false);
+                }}
+              >
+                <Text style={[styles.menuItemText, on && styles.menuItemTextOn]} numberOfLines={1}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 function visitKind(visit: Visit): Exclude<StatusFilter, "all"> | "later" {
@@ -154,27 +277,29 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
           })()
         : lastNDays(period === "7" ? 7 : 14, trendMap, colors.green);
 
-  function onPick(event: DateTimePickerEvent, value?: Date) {
-    if (Platform.OS === "android") setPicking(null);
-    if (event.type === "dismissed" || !value) return;
+  function applyDate(which: "start" | "end", value: Date) {
     const picked = clampToToday(value);
-    if (picking === "start") {
+    if (which === "start") {
       setStartDate(picked);
       setEndDate((current) => (picked.getTime() > current.getTime() ? picked : current));
-    } else if (picking === "end") {
-      setEndDate(picked);
-      setStartDate((current) => (picked.getTime() < current.getTime() ? picked : current));
+      return;
     }
+    setEndDate(picked);
+    setStartDate((current) => (picked.getTime() < current.getTime() ? picked : current));
   }
 
   return (
     <View style={styles.wrap}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} style={styles.scroller}>
-        <Chip label="By day" on={period === "day"} onPress={() => setPeriod("day")} />
-        <Chip label="Last 7 days" on={period === "7"} onPress={() => setPeriod("7")} />
-        <Chip label="Last 30 days" on={period === "30"} onPress={() => setPeriod("30")} />
-        <Chip label="Custom dates" on={period === "range"} onPress={() => setPeriod("range")} />
-      </ScrollView>
+      <DropMenu
+        value={period}
+        options={[
+          { id: "day", label: "By day" },
+          { id: "7", label: "Last 7 days" },
+          { id: "30", label: "Last 30 days" },
+          { id: "range", label: "Custom dates" },
+        ]}
+        onChange={(id) => setPeriod(id as Period)}
+      />
 
       {period === "day" ? (
         <View style={styles.dayRow}>
@@ -197,48 +322,56 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
         <View style={styles.rangeBox}>
           <Text style={styles.rangeHint}>Choose start and end. End date cannot be after today.</Text>
           <View style={styles.rangeRow}>
-            <Pressable style={styles.dateBtn} onPress={() => setPicking("start")}>
-              <Text style={styles.dateLabel}>Start date</Text>
-              <Text style={styles.dateValue}>{rangeLabel(startDate)}</Text>
-            </Pressable>
-            <Pressable style={styles.dateBtn} onPress={() => setPicking("end")}>
-              <Text style={styles.dateLabel}>End date</Text>
-              <Text style={styles.dateValue}>{rangeLabel(endDate)}</Text>
-            </Pressable>
+            {(["start", "end"] as const).map((which) => {
+              const value = which === "start" ? startDate : endDate;
+              const open = picking === which;
+              return (
+                <Pressable
+                  key={which}
+                  style={[styles.dateBtn, open && styles.dateBtnOn]}
+                  onPress={() => setPicking(open ? null : which)}
+                  accessibilityLabel={which === "start" ? "Start date" : "End date"}
+                >
+                  <Text style={styles.dateLabel}>{which === "start" ? "Start date" : "End date"}</Text>
+                  <Text style={styles.dateValue}>{rangeLabel(value)}</Text>
+                </Pressable>
+              );
+            })}
           </View>
+          {picking ? (
+            <MiniCalendar
+              key={picking}
+              value={picking === "start" ? startDate : endDate}
+              maximum={picking === "start" && endDate.getTime() < todayStart().getTime() ? endDate : todayStart()}
+              onPick={(date) => {
+                applyDate(picking, date);
+                setPicking(null);
+              }}
+            />
+          ) : null}
           <Text style={typo.muted}>
             Showing {range.from} → {range.to}
           </Text>
         </View>
       ) : null}
 
-      {picking ? (
-        <DateTimePicker
-          value={picking === "start" ? startDate : endDate}
-          mode="date"
-          display={Platform.OS === "ios" ? "spinner" : "default"}
-          maximumDate={todayStart()}
-          onChange={onPick}
+      <View style={styles.menuRow}>
+        <DropMenu
+          value={status}
+          options={statusChips.map((chip) => ({ id: chip.id, label: `${chip.label} ${counts[chip.id]}` }))}
+          onChange={(id) => setStatus(id as StatusFilter)}
         />
-      ) : null}
-      {picking && Platform.OS === "ios" ? (
-        <Pressable style={styles.donePick} onPress={() => setPicking(null)}>
-          <Text style={styles.donePickText}>Done</Text>
-        </Pressable>
-      ) : null}
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} style={styles.scroller}>
-        {statusChips.map((chip) => (
-          <Chip key={chip.id} label={`${chip.label} ${counts[chip.id]}`} on={status === chip.id} onPress={() => setStatus(chip.id)} />
-        ))}
         {showPerson ? (
-          <Chip
-            label={`With photo ${rows.filter((v) => v.hasPhoto).length}`}
-            on={photoOnly}
-            onPress={() => setPhotoOnly((on) => !on)}
+          <DropMenu
+            value={photoOnly ? "photo" : "any"}
+            options={[
+              { id: "any", label: "All photos" },
+              { id: "photo", label: `With photo ${rows.filter((visit) => visit.hasPhoto).length}` },
+            ]}
+            onChange={(id) => setPhotoOnly(id === "photo")}
           />
         ) : null}
-      </ScrollView>
+      </View>
 
       {!loading && counts.all > 0 ? (
         <Card>
@@ -321,9 +454,39 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 12 },
-  scroller: { flexGrow: 0, flexShrink: 0 },
-  chips: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 8 },
+  wrap: { gap: 12, zIndex: 2 },
+  menuRow: { flexDirection: "row", gap: 8, zIndex: 3 },
+  menu: { flex: 1, zIndex: 2 },
+  menuOpen: { zIndex: 4 },
+  menuBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  menuText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: "500" },
+  menuList: {
+    position: "absolute",
+    top: 40,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    overflow: "hidden",
+    ...shadow,
+  },
+  menuItem: { paddingHorizontal: 12, paddingVertical: 9 },
+  menuItemOn: { backgroundColor: "#EEF4FF" },
+  menuItemText: { color: colors.text, fontSize: 14, fontWeight: "400" },
+  menuItemTextOn: { fontWeight: "600", color: colors.blue },
   dayRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   arrow: {
     width: 44,
@@ -350,10 +513,26 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "transparent",
     paddingVertical: 10,
     paddingHorizontal: 12,
     gap: 2,
   },
+  dateBtnOn: { borderColor: colors.blue },
+  calendar: { backgroundColor: "#fff", borderRadius: 12, padding: 10, gap: 8 },
+  calHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  calTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  calArrow: { color: colors.blue, fontSize: 22, fontWeight: "600", paddingHorizontal: 8 },
+  calArrowOff: { color: colors.line },
+  calGrid: { flexDirection: "row", flexWrap: "wrap" },
+  calWeek: { width: "14.28%", textAlign: "center", color: colors.muted, fontSize: 12, fontWeight: "500", paddingVertical: 4 },
+  calCell: { width: "14.28%", height: 36, alignItems: "center", justifyContent: "center", borderRadius: 8 },
+  calCellOn: { backgroundColor: colors.blue },
+  calDay: { color: colors.text, fontSize: 14, fontWeight: "500" },
+  calDayOn: { color: "#fff", fontWeight: "600" },
+  calToday: { color: colors.blue },
+  calDayOff: { color: colors.line },
   dateLabel: { fontSize: 11, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 },
   dateValue: { fontSize: 15, fontWeight: "800", color: colors.text },
   donePick: {
@@ -368,5 +547,4 @@ const styles = StyleSheet.create({
   name: { fontWeight: "800", color: colors.text, fontSize: 16 },
   proofOn: { color: colors.green, fontWeight: "800", fontSize: 13 },
   sale: { color: colors.green, fontWeight: "800" },
-  proofOn: { color: colors.green, fontWeight: "800", fontSize: 13 },
 });

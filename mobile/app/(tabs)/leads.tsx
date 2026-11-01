@@ -134,7 +134,7 @@ export default function LeadsScreen() {
   }, [params.assigneeId]);
 
   useEffect(() => {
-    if (params.filter === "pending" || params.filter === "new" || params.filter === "follow-up" || params.filter === "won" || params.filter === "all") {
+    if (params.filter === "pending" || params.filter === "new" || params.filter === "all") {
       setFilter(params.filter);
       if (params.filter === "pending") setTab("waiting");
     }
@@ -343,12 +343,9 @@ export default function LeadsScreen() {
               <FilterMenu
                 value={filter}
                 options={[
-                  { id: "all", label: "All types" },
-                  { id: "pending", label: "To approve" },
+                  { id: "all", label: "All" },
                   { id: "new", label: "New" },
-                  { id: "follow-up", label: "Follow-up" },
-                  { id: "interested", label: "Interested" },
-                  { id: "won", label: "Won" },
+                  { id: "pending", label: "To approve" },
                 ]}
                 onChange={setFilter}
               />

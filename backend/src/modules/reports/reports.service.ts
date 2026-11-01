@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { isManager } from "../crm/crm.helpers.js";
+import { parseDay } from "../beat/beat.helpers.js";
 import { asNumber, dayBounds } from "../visits/visits.helpers.js";
 
 function monthBounds(now = new Date()) {
@@ -11,6 +12,24 @@ function monthBounds(now = new Date()) {
   const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
   const end = new Date(year, month, 0, 23, 59, 59, 999);
   return { year, month, start, end };
+}
+
+function periodBounds(from?: string, to?: string) {
+  if (!from) return monthBounds();
+  const start = parseDay(from).start;
+  let end = parseDay(to || from).end;
+  const todayEnd = dayBounds().end;
+  if (end.getTime() > todayEnd.getTime()) end = todayEnd;
+  if (end.getTime() < start.getTime()) {
+    const swappedStart = parseDay(to || from).start;
+    return {
+      year: swappedStart.getFullYear(),
+      month: swappedStart.getMonth() + 1,
+      start: swappedStart,
+      end: parseDay(from).end,
+    };
+  }
+  return { year: start.getFullYear(), month: start.getMonth() + 1, start, end };
 }
 
 function money(value: unknown) {
@@ -148,11 +167,17 @@ export async function setTarget(input: {
   return { userId: user.id, name: user.name, year: row.year, month: row.month, amount: money(row.amount) };
 }
 
-export async function personSummary(tenantId: number, actorId: number, roles: RoleCode[], requested?: number) {
+export async function personSummary(
+  tenantId: number,
+  actorId: number,
+  roles: RoleCode[],
+  requested?: number,
+  range?: { from?: string; to?: string },
+) {
   assertReporter(roles);
   const scope = personScope(tenantId, actorId, roles, requested);
   const day = dayBounds();
-  const month = monthBounds();
+  const month = periodBounds(range?.from, range?.to);
   const people = await listFieldUsers(tenantId, actorId, roles, requested);
   const userIds = people.map((person) => person.id);
   const saleWhere = userIds.length === 1 ? { tenantId, userId: userIds[0] } : { tenantId, userId: { in: userIds } };
@@ -215,12 +240,25 @@ export async function daySummary(tenantId: number, userId: number, roles: RoleCo
   };
 }
 
-export async function funnel(tenantId: number, userId: number, roles: RoleCode[], days = 30) {
+export async function funnel(
+  tenantId: number,
+  userId: number,
+  roles: RoleCode[],
+  days = 30,
+  range?: { from?: string; to?: string },
+) {
   assertReporter(roles);
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - Math.max(1, days));
-  start.setHours(0, 0, 0, 0);
+  const period = range?.from ? periodBounds(range.from, range.to) : null;
+  const end = period ? period.end : new Date();
+  const start = period
+    ? period.start
+    : (() => {
+        const day = new Date();
+        day.setDate(day.getDate() - Math.max(1, days));
+        day.setHours(0, 0, 0, 0);
+        return day;
+      })();
+  const spanDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
   const people = await listFieldUsers(tenantId, userId, roles);
   const userIds = people.map((person) => person.id);
   const leadWhere = isManager(roles) ? { tenantId } : { tenantId, assigneeId: userId };
@@ -254,7 +292,7 @@ export async function funnel(tenantId: number, userId: number, roles: RoleCode[]
   const visitCount = visited.size;
   const saleCount = sold.size;
   return {
-    days,
+    days: period ? spanDays : days,
     leads: leadCount,
     visited: visitCount,
     sold: saleCount,
