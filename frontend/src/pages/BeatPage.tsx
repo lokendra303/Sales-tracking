@@ -16,12 +16,16 @@ type Beat = {
   id: number;
   name: string;
   territory?: string | null;
-  assigneeId: number;
+  hqId?: number | null;
+  repeatDays?: number[] | null;
+  repeatEvery?: number | null;
+  assigneeId: number | null;
   assigneeName: string | null;
   notes: string | null;
   size: number;
   members: Member[];
 };
+type Hq = { id: number; name: string; beatCount: number };
 type Place = {
   id: number;
   kind: "lead" | "customer";
@@ -35,6 +39,8 @@ type Place = {
 type DayMap = Record<number, { beatId: number; beatName: string } | null>;
 
 const CYCLE_PRESETS = [7, 15, 20, 30];
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const DAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function isoToday() {
   const n = new Date();
@@ -62,7 +68,13 @@ export function BeatPage() {
   const [places, setPlaces] = useState<Place[]>([]);
   const [q, setQ] = useState("");
   const [newName, setNewName] = useState("");
-  const [newTerritory, setNewTerritory] = useState("");
+  const [hqs, setHqs] = useState<Hq[]>([]);
+  const [hqDraft, setHqDraft] = useState("");
+  const [hqChoice, setHqChoice] = useState<string>("");
+  const [newHqName, setNewHqName] = useState("");
+  const [pickedLeadIds, setPickedLeadIds] = useState<number[]>([]);
+  const [planDays, setPlanDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]);
+  const [repeatEvery, setRepeatEvery] = useState(7);
   const [hqFilter, setHqFilter] = useState<"all" | "none" | string>("all");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -70,23 +82,18 @@ export function BeatPage() {
 
   const selected = beats.find((b) => b.id === selectedBeatId) ?? null;
 
-  const hqOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const beat of beats) {
-      const raw = beat.territory?.trim();
-      if (!raw) continue;
-      const key = raw.toLowerCase();
-      if (!map.has(key)) map.set(key, raw);
-    }
-    return [...map.values()].sort((a, b) => a.localeCompare(b));
-  }, [beats]);
-
   const matchesHq = (beat: Beat) => {
-    const hq = beat.territory?.trim() ?? "";
     if (hqFilter === "all") return true;
-    if (hqFilter === "none") return !hq;
-    return hq.toLowerCase() === hqFilter.toLowerCase();
+    if (hqFilter === "none") return !beat.hqId;
+    return beat.hqId === Number(hqFilter);
   };
+
+  const createLeads = places.filter((place) => {
+    if (place.kind !== "lead") return false;
+    if (place.status === "LOST" || place.status === "WON") return false;
+    if (place.approvalStatus && place.approvalStatus !== "APPROVED") return false;
+    return true;
+  });
 
   const personBeats = useMemo(
     () => beats.filter((b) => b.assigneeId === userId && matchesHq(b)),
@@ -96,9 +103,9 @@ export function BeatPage() {
   );
 
   const listedBeats = useMemo(
-    () => beats.filter((b) => (!userId || b.assigneeId === userId) && matchesHq(b)),
+    () => beats.filter((b) => matchesHq(b)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [beats, userId, hqFilter],
+    [beats, hqFilter],
   );
 
   useEffect(() => {
@@ -131,6 +138,12 @@ export function BeatPage() {
     const data = await api<{ date: string; people: Person[] }>("/beat", { token: accessToken });
     setPeople(data.people ?? []);
     if (!userId && data.people[0]) setUserId(data.people[0].userId);
+  }
+
+  async function loadHqs() {
+    if (!accessToken) return;
+    const data = await api<Hq[]>("/hqs", { token: accessToken });
+    setHqs(data);
   }
 
   async function loadBeats() {
@@ -176,7 +189,7 @@ export function BeatPage() {
 
   useEffect(() => {
     if (!accessToken) return;
-    Promise.all([loadPeople(), loadBeats(), loadPlaces()]).catch((err) =>
+    Promise.all([loadPeople(), loadBeats(), loadPlaces(), loadHqs()]).catch((err) =>
       setError(err instanceof Error ? err.message : "Could not load."),
     );
   }, [accessToken]);
@@ -186,8 +199,44 @@ export function BeatPage() {
     loadSchedule(userId).catch(() => undefined);
   }, [accessToken, userId]);
 
+  useEffect(() => {
+    const every = selected?.repeatEvery && selected.repeatEvery >= 2 ? selected.repeatEvery : 7;
+    setRepeatEvery(every);
+    setPlanDays(selected?.repeatDays?.length ? selected.repeatDays : every === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
+  }, [selected?.id, selected?.repeatDays, selected?.repeatEvery]);
+
+  async function addHq() {
+    if (!accessToken || !hqDraft.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api<Hq>("/hqs", {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ name: hqDraft.trim() }),
+      });
+      setHqDraft("");
+      setHqChoice(String(data.id));
+      setHqFilter(String(data.id));
+      setNotice(`HQ “${data.name}” is ready. Create a beat under it.`);
+      await loadHqs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add HQ.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createBeat() {
-    if (!accessToken || !userId || !newName.trim()) return;
+    if (!accessToken || !newName.trim()) return;
+    if (!hqChoice) {
+      setError("Select an HQ, or add a new one.");
+      return;
+    }
+    if (hqChoice === "new" && !newHqName.trim()) {
+      setError("Enter the new HQ name.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -196,17 +245,66 @@ export function BeatPage() {
         token: accessToken,
         body: JSON.stringify({
           name: newName.trim(),
-          assigneeId: userId,
-          territory: newTerritory.trim() || undefined,
+          ...(hqChoice === "new" ? { hqName: newHqName.trim() } : { hqId: Number(hqChoice) }),
+          leadIds: pickedLeadIds,
         }),
       });
       setNewName("");
-      setNewTerritory("");
-      setNotice(`Created “${data.name}” (${data.size} stops).`);
-      await loadBeats();
+      setNewHqName("");
+      setPickedLeadIds([]);
+      setNotice(`Created “${data.name}” with ${data.size} leads. Assign a salesperson, then save the repeating plan.`);
+      await Promise.all([loadBeats(), loadHqs()]);
       setSelectedBeatId(data.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create beat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function assignBeat(assigneeId: number | null) {
+    if (!accessToken || !selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/beats/${selected.id}`, {
+        method: "PATCH",
+        token: accessToken,
+        body: JSON.stringify({ assigneeId }),
+      });
+      setNotice(assigneeId ? "Salesperson assigned. Save the repeating plan so it becomes their daily task." : "Beat is unassigned.");
+      await loadBeats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not assign the salesperson.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRepeat() {
+    if (!accessToken || !selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api<Beat>(`/beats/${selected.id}/repeat`, {
+        method: "PUT",
+        token: accessToken,
+        body: JSON.stringify({ weekdays: planDays.filter((day) => day < repeatEvery), every: repeatEvery }),
+      });
+      const who = data.assigneeName ?? "The salesperson";
+      const cycle = data.repeatEvery && data.repeatEvery >= 2 ? data.repeatEvery : 7;
+      setNotice(
+        !data.repeatDays?.length
+          ? "Daily plan cleared."
+          : cycle === 7
+            ? `${who} gets “${data.name}” on the selected days every week. It shows up as today’s beat on its own.`
+            : data.repeatDays.length === 1 && data.repeatDays[0] === 0
+              ? `${who} gets “${data.name}” every ${cycle} days. It shows up as today’s beat on its own.`
+              : `${who} gets “${data.name}” on the selected days of every ${cycle} days.`,
+      );
+      await loadBeats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the daily plan.");
     } finally {
       setBusy(false);
     }
@@ -328,8 +426,8 @@ export function BeatPage() {
       <p className="kicker">Field plan</p>
       <h1>Beats</h1>
       <p className="muted">
-        Create permanent beats with any number of shops under an HQ (e.g. NDL), assign each to a salesperson, then set a
-        rotating cycle (7, 15, 20, 30 days). The phone loads today’s beat from the cycle.
+        Add an HQ, create a beat under it and attach the leads, then assign a salesperson and a repeating plan.
+        Pick any cycle from 2 to 30 days. The phone shows that beat as today’s task on the chosen days. You do not set it again each morning.
       </p>
 
       <div className="toolbar">
@@ -341,24 +439,27 @@ export function BeatPage() {
         </button>
       </div>
 
-      <div className="chips" role="tablist" aria-label="Filter by HQ">
-        <button type="button" className={hqFilter === "all" ? "chip on" : "chip"} onClick={() => setHqFilter("all")}>
-          All HQ
+      <h2>Headquarters</h2>
+      <div className="toolbar">
+        <input
+          value={hqDraft}
+          onChange={(e) => setHqDraft(e.target.value)}
+          placeholder="New HQ e.g. New Delhi"
+          style={{ flex: 1, minWidth: 180 }}
+        />
+        <button className="btn" type="button" disabled={busy || !hqDraft.trim()} onClick={addHq}>
+          Add HQ
         </button>
-        {hqOptions.map((hq) => (
-          <button
-            key={hq}
-            type="button"
-            className={hqFilter.toLowerCase() === hq.toLowerCase() ? "chip on" : "chip"}
-            onClick={() => setHqFilter(hq)}
-          >
-            {hq}
-          </button>
-        ))}
-        <button type="button" className={hqFilter === "none" ? "chip on" : "chip"} onClick={() => setHqFilter("none")}>
-          No HQ
-        </button>
+        <select value={hqFilter} onChange={(e) => setHqFilter(e.target.value)} style={{ minWidth: 220 }}>
+          <option value="all">All HQ · {beats.length} beats</option>
+          {hqs.map((hq) => (
+            <option key={hq.id} value={hq.id}>
+              {hq.name} · {hq.beatCount} beat{hq.beatCount === 1 ? "" : "s"}
+            </option>
+          ))}
+        </select>
       </div>
+      {!hqs.length ? <p className="muted">No HQ yet. Add one above, then create beats under it.</p> : null}
       {notice ? <p className="on">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
@@ -377,7 +478,6 @@ export function BeatPage() {
                   <strong>{person.name}</strong>
                   <div className="muted">
                     {beats.filter((b) => b.assigneeId === person.userId && matchesHq(b)).length} beats
-                    {hqFilter !== "all" ? ` · ${hqFilter === "none" ? "No HQ" : hqFilter}` : ""}
                   </div>
                 </div>
               </button>
@@ -388,7 +488,8 @@ export function BeatPage() {
 
         {tab === "beats" ? (
           <section>
-            <h2>Create beat for {people.find((p) => p.userId === userId)?.name ?? "…"}</h2>
+            <h2>Create beat</h2>
+            <p className="muted">Choose an HQ and the leads. The salesperson is assigned after the beat exists.</p>
             <div className="toolbar">
               <input
                 value={newName}
@@ -396,21 +497,55 @@ export function BeatPage() {
                 placeholder="Beat name e.g. Beat 1"
                 style={{ flex: 1, minWidth: 140 }}
               />
-              <input
-                value={newTerritory}
-                onChange={(e) => setNewTerritory(e.target.value)}
-                placeholder="HQ e.g. NDL, PUNE 1"
-                style={{ flex: 1, minWidth: 160 }}
-              />
-              <button className="btn green" type="button" disabled={busy || !userId || !newName.trim()} onClick={createBeat}>
+              <select value={hqChoice} onChange={(e) => setHqChoice(e.target.value)} style={{ minWidth: 160 }}>
+                <option value="">Select HQ</option>
+                {hqs.map((hq) => (
+                  <option key={hq.id} value={hq.id}>
+                    {hq.name}
+                  </option>
+                ))}
+                <option value="new">Add new HQ</option>
+              </select>
+              {hqChoice === "new" ? (
+                <input
+                  value={newHqName}
+                  onChange={(e) => setNewHqName(e.target.value)}
+                  placeholder="New HQ name"
+                  style={{ flex: 1, minWidth: 140 }}
+                />
+              ) : null}
+              <button className="btn green" type="button" disabled={busy || !newName.trim()} onClick={createBeat}>
                 Create
               </button>
+            </div>
+            <div className="list" style={{ maxHeight: 220, overflow: "auto" }}>
+              {createLeads.slice(0, 40).map((place) => (
+                <label key={place.id} className="card person" style={{ cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={pickedLeadIds.includes(place.id)}
+                    onChange={() =>
+                      setPickedLeadIds((current) =>
+                        current.includes(place.id) ? current.filter((id) => id !== place.id) : [...current, place.id],
+                      )
+                    }
+                  />
+                  <div>
+                    <strong>{place.name}</strong>
+                    <div className="muted">
+                      {place.phone}
+                      {place.city ? ` · ${place.city}` : ""}
+                    </div>
+                  </div>
+                </label>
+              ))}
+              {!createLeads.length ? <p className="muted">No approved leads to add.</p> : null}
             </div>
 
             <h2>
               Beats
               {hqFilter !== "all" ? (
-                <span className="muted"> · {hqFilter === "none" ? "No HQ" : hqFilter}</span>
+                <span className="muted"> · {hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name}</span>
               ) : null}
             </h2>
             <div className="list">
@@ -426,7 +561,7 @@ export function BeatPage() {
                         {b.name}
                       </strong>
                       <div className="muted">
-                        {b.size} stops · {b.territory || "No HQ"} · {b.assigneeName}
+                        {b.size} stops · {b.territory || "No HQ"} · {b.assigneeName ?? "Not assigned"}
                       </div>
                     </div>
                   </button>
@@ -435,7 +570,7 @@ export function BeatPage() {
                 <p className="muted">
                   {hqFilter === "all"
                     ? "No beats yet. Create one above."
-                    : `No beats for ${hqFilter === "none" ? "No HQ" : hqFilter}. Pick another HQ or create a beat.`}
+                    : `No beats for ${hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name ?? "this HQ"}. Pick another HQ or create a beat.`}
                 </p>
               ) : null}
             </div>
@@ -444,8 +579,95 @@ export function BeatPage() {
               <>
                 <div className="toolbar" style={{ marginTop: 16 }}>
                   <h2 style={{ margin: 0, flex: 1 }}>
-                    {selected.name} · {selected.size} stops
+                    {selected.name} · {selected.size} stops · {selected.territory || "No HQ"}
                   </h2>
+                </div>
+                <div className="toolbar">
+                  <label className="muted">
+                    Salesperson{" "}
+                    <select
+                      value={selected.assigneeId ?? ""}
+                      onChange={(e) => assignBeat(e.target.value ? Number(e.target.value) : null)}
+                      disabled={busy}
+                    >
+                      <option value="">Not assigned</option>
+                      {people.map((person) => (
+                        <option key={person.userId} value={person.userId}>
+                          {person.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="muted">
+                  Repeating plan. Choose 2 to 30 days. The selected days come back after that many days, so you do not assign the beat again.
+                </p>
+                <div className="toolbar">
+                  <label className="muted">
+                    Repeat every{" "}
+                    <input
+                      type="number"
+                      min={2}
+                      max={30}
+                      value={repeatEvery}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = Math.min(30, Math.max(2, Number(e.target.value) || 2));
+                        setRepeatEvery(next);
+                        setPlanDays(next === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
+                      }}
+                      style={{ width: 72 }}
+                    />{" "}
+                    days
+                  </label>
+                  {[7, 15, 30].map((count) => (
+                    <button
+                      key={count}
+                      className={`btn ${repeatEvery === count ? "blue" : ""}`}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setRepeatEvery(count);
+                        setPlanDays(count === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
+                      }}
+                    >
+                      {count}d
+                    </button>
+                  ))}
+                </div>
+                <div className="chips">
+                  {repeatEvery === 7
+                    ? DAY_ORDER.map((day) => (
+                        <button
+                          key={day}
+                          type="button"
+                          className={planDays.includes(day) ? "chip on" : "chip"}
+                          onClick={() =>
+                            setPlanDays((current) =>
+                              current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
+                            )
+                          }
+                        >
+                          {DAY_LABEL[day]}
+                        </button>
+                      ))
+                    : Array.from({ length: repeatEvery }, (_, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          className={planDays.includes(index) ? "chip on" : "chip"}
+                          onClick={() =>
+                            setPlanDays((current) =>
+                              current.includes(index) ? current.filter((item) => item !== index) : [...current, index],
+                            )
+                          }
+                        >
+                          {index + 1}
+                        </button>
+                      ))}
+                  <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveRepeat}>
+                    Save repeating plan
+                  </button>
                 </div>
                 <div className="list">
                   {selected.members.map((stop, index) => (
@@ -508,8 +730,7 @@ export function BeatPage() {
           <section>
             <h2>Schedule · {people.find((p) => p.userId === userId)?.name ?? "Pick someone"}</h2>
             <p className="muted">
-              Set cycle length (e.g. 15 / 20 / 30 days) and start date. Day 1 of the cycle repeats after the last day.
-              Leave a day Off if they should not run a beat that day.
+              The repeating plan on a beat already repeats every 2 to 30 days. Saving a different cycle here replaces that plan.
             </p>
             <div className="toolbar">
               <label className="muted">

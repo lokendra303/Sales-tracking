@@ -53,6 +53,7 @@ const createLeadSchema = z.object({
   potential: z.number().nonnegative().optional(),
   temperature: z.enum(Temperature).optional(),
   assigneeId: z.number().int().positive().optional(),
+  beatId: z.number().int().positive().optional(),
   createAnyway: z.boolean().optional(),
   clientRequestId: z.string().min(4).max(80).optional(),
 });
@@ -83,6 +84,7 @@ crmRouter.get(
     const rawAssignee = typeof req.query.assigneeId === "string" ? req.query.assigneeId : undefined;
     const assigneeId =
       rawAssignee === "unassigned" ? "unassigned" : rawAssignee && Number(rawAssignee) > 0 ? Number(rawAssignee) : undefined;
+    const includeCreated = req.query.includeCreated === "1" || req.query.includeCreated === "true";
     const data = await crm.listLeads({
       tenantId: req.auth!.tenantId,
       userId: req.auth!.userId,
@@ -90,6 +92,7 @@ crmRouter.get(
       q,
       filter,
       assigneeId,
+      includeCreated,
     });
     res.json({ success: true, data });
   }),

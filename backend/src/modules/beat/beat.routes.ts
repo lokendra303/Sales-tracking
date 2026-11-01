@@ -99,6 +99,29 @@ beatRouter.post(
 );
 
 beatRouter.get(
+  "/hqs",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const data = await beat.listHqs(req.auth!.tenantId);
+    res.json({ success: true, data });
+  }),
+);
+
+beatRouter.post(
+  "/hqs",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ name: z.string().min(1).max(160) }).parse(req.body);
+    const data = await beat.createHq({
+      tenantId: req.auth!.tenantId,
+      roles: req.auth!.roles,
+      name: body.name,
+    });
+    res.status(201).json({ success: true, data });
+  }),
+);
+
+beatRouter.get(
   "/beats",
   requireRole("MANAGER"),
   asyncHandler(async (req, res) => {
@@ -118,8 +141,11 @@ beatRouter.post(
     const body = z
       .object({
         name: z.string().min(2).max(120),
-        assigneeId: z.number().int().positive(),
+        assigneeId: z.number().int().positive().optional(),
         territory: z.string().max(160).optional(),
+        hqId: z.number().int().positive().optional(),
+        hqName: z.string().max(160).optional(),
+        leadIds: z.array(z.number().int().positive()).max(200).optional(),
         notes: z.string().max(2000).optional(),
       })
       .parse(req.body);
@@ -139,7 +165,7 @@ beatRouter.patch(
     const body = z
       .object({
         name: z.string().min(2).max(120).optional(),
-        assigneeId: z.number().int().positive().optional(),
+        assigneeId: z.number().int().positive().nullable().optional(),
         territory: z.string().max(160).nullable().optional(),
         notes: z.string().max(2000).nullable().optional(),
       })
@@ -149,6 +175,27 @@ beatRouter.patch(
       roles: req.auth!.roles,
       id: Number(req.params.id),
       ...body,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+beatRouter.put(
+  "/beats/:id/repeat",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        weekdays: z.array(z.number().int().min(0).max(29)).max(30),
+        every: z.number().int().min(2).max(30).optional(),
+      })
+      .parse(req.body);
+    const data = await beat.setBeatRepeat({
+      tenantId: req.auth!.tenantId,
+      roles: req.auth!.roles,
+      beatId: Number(req.params.id),
+      weekdays: body.weekdays,
+      every: body.every,
     });
     res.json({ success: true, data });
   }),

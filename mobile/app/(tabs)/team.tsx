@@ -74,7 +74,13 @@ export default function TeamScreen() {
       header={
         <ScreenHeader
           title={admin ? "Managers" : "Team"}
-          subtitle={admin ? "System admin — managers only" : "Field executives and desk logins"}
+          subtitle={
+            loading
+              ? admin
+                ? "System admin — managers only"
+                : "Field executives and desk logins"
+              : `${users.length} ${users.length === 1 ? "person" : "people"}`
+          }
           right={
             <Pressable style={styles.add} onPress={() => router.push("/user/new")} accessibilityLabel={admin ? "Add manager" : "Add person"}>
               <Ionicons name="add" size={22} color="#fff" />
@@ -85,13 +91,13 @@ export default function TeamScreen() {
     >
       {manager && users.length ? (
         <View style={styles.summary}>
-          <SummaryCell value={field.filter((row) => row.liveStreaming).length} label="Live" color={colors.green} />
+          <SummaryCell value={field.filter((row) => row.liveStreaming).length} label="GPS on" color={colors.green} />
           <View style={styles.summaryDivider} />
-          <SummaryCell value={field.filter((row) => row.fieldStatus === "ACTIVE").length} label="In field" color={colors.amber} />
+          <SummaryCell value={field.filter((row) => row.fieldStatus === "ACTIVE").length} label="Working" color={colors.amber} />
           <View style={styles.summaryDivider} />
           <SummaryCell
             value={users.filter((row) => row.roles.includes("SALES_EXECUTIVE")).length}
-            label="Field"
+            label="Sales"
             color={colors.blue}
           />
           <View style={styles.summaryDivider} />
@@ -102,14 +108,19 @@ export default function TeamScreen() {
           />
         </View>
       ) : null}
+      {manager && users.length ? (
+        <Text style={styles.summaryHint}>
+          GPS on means their phone is sending location. Working means they started the day. Sales are field people. Desk are portal logins.
+        </Text>
+      ) : null}
       {manager ? (
         <Card>
           <View style={styles.liveRow}>
             <View style={[styles.liveIcon, { backgroundColor: liveOn ? colors.greenSoft : colors.bg }]}>
-              <Ionicons name="navigate" size={18} color={liveOn ? colors.green : colors.muted} />
+              <Ionicons name="location" size={18} color={liveOn ? colors.green : colors.muted} />
             </View>
             <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={styles.name}>Live location</Text>
+              <Text style={styles.name}>See where they are</Text>
               <Text style={typo.muted}>
                 {liveOn
                   ? "On. After Start Field Work, GPS from the phone shows here. Visit photos still prove each shop."
@@ -198,13 +209,13 @@ export default function TeamScreen() {
                   </Text>
                   {inField ? (
                     <Text style={styles.fieldLine} numberOfLines={1}>
-                      In field · {live!.durationMinutes} min
+                      Working · {live!.durationMinutes} min
                       {live!.liveStreaming ? ` · ${ageLabel(live!.lastSeenAgeSeconds)}` : ""}
                     </Text>
                   ) : null}
                 </View>
                 <Badge
-                  label={streaming ? "Live" : inField ? "In field" : item.status === "ACTIVE" ? "Active" : "Off"}
+                  label={streaming ? "GPS on" : inField ? "Working" : item.status === "ACTIVE" ? "Active" : "Off"}
                   tone={streaming || inField ? "green" : item.status === "ACTIVE" ? "slate" : "red"}
                 />
               </View>
@@ -220,20 +231,30 @@ export default function TeamScreen() {
                       <MiniAction
                         icon="briefcase-outline"
                         label="Leads"
-                        onPress={() => router.push({ pathname: "/leads", params: { assigneeId: String(item.id) } })}
+                        onPress={() =>
+                          router.push({
+                            pathname: "/executive/leads",
+                            params: { userId: String(item.id), name: item.name },
+                          } as Href)
+                        }
                       />
                       <MiniAction
                         icon="camera-outline"
                         label="Visits"
-                        onPress={() => router.push({ pathname: "/visits", params: { userId: String(item.id) } })}
+                        onPress={() =>
+                          router.push({
+                            pathname: "/executive/visits",
+                            params: { userId: String(item.id), name: item.name },
+                          } as Href)
+                        }
                       />
                     </>
                   ) : null}
                   <MiniAction icon="call-outline" label="Call" onPress={() => openCall(item.phone)} />
                   {streaming ? (
                     <MiniAction
-                      icon="navigate"
-                      label="Map"
+                      icon="location-outline"
+                      label="Where"
                       tone="green"
                       onPress={() => openNavigate(live!.lastLat, live!.lastLng, item.name)}
                     />
@@ -333,5 +354,6 @@ const styles = StyleSheet.create({
   summaryCell: { flex: 1, alignItems: "center", gap: 2 },
   summaryValue: { fontSize: 22, fontWeight: "800" },
   summaryLabel: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+  summaryHint: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: -4 },
   summaryDivider: { width: StyleSheet.hairlineWidth, alignSelf: "stretch", backgroundColor: colors.line },
 });

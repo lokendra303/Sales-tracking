@@ -9,6 +9,7 @@ import { getLocalVisit, removeLocalVisit, saveLocalVisit, type LocalVisit } from
 import { useOffline } from "@/lib/offline";
 import { keepPhoto } from "@/lib/photos";
 import { openNavigate, when } from "@/lib/format";
+import { goBack } from "@/lib/nav";
 import { colors, typo } from "@/lib/theme";
 
 export default function DraftVisitScreen() {
@@ -89,7 +90,7 @@ export default function DraftVisitScreen() {
     try {
       const ids = [visit.checkInJobId, visit.photoJobId, visit.completeJobId].filter((id): id is string => Boolean(id));
       await Promise.all([offline.drop(ids), removeLocalVisit(visit.localId)]);
-      router.replace("/leads");
+      goBack("/visits");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not save Do later.");
     } finally {
@@ -162,7 +163,7 @@ export default function DraftVisitScreen() {
 
   if (capturing) {
     return (
-      <Screen scroll={false} header={<ScreenHeader title="Shop photo" back align="center" fallback="/visits" />}>
+      <Screen scroll={false} header={<ScreenHeader title="Shop photo" back align="center" onBack={() => setCapturing(false)} />}>
         {busy ? <ActivityIndicator color={colors.blue} /> : null}
         <LiveCamera onCapture={saveLivePhoto} onCancel={() => setCapturing(false)} />
       </Screen>

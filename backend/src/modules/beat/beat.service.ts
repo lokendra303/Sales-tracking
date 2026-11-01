@@ -12,6 +12,7 @@ import {
   parseDay,
   plannedAtFor,
   publicStop,
+  weekStartSunday,
 } from "./beat.helpers.js";
 
 const stopInclude = { lead: true, customer: true };
@@ -27,6 +28,139 @@ async function requireSalesUser(tenantId: number, userId: number) {
     throw badRequest("Beat planning is only for sales executives.");
   }
   return user;
+}
+
+function parseRepeat(value: string | null | undefined) {
+  if (!value) return [];
+  const days = value
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 29);
+  return [...new Set(days)].sort((a, b) => a - b);
+}
+
+function formatRepeat(days: number[]) {
+  const clean = [...new Set(days.filter((day) => Number.isInteger(day) && day >= 0 && day <= 29))].sort((a, b) => a - b);
+  return clean.length ? clean.join(",") : null;
+}
+
+function cleanOffsets(days: number[], every: number) {
+  return [...new Set(days.filter((day) => Number.isInteger(day) && day >= 0 && day < every))].sort((a, b) => a - b);
+}
+
+function storedEvery(row: { repeatEvery?: number | null; repeatDays?: string | null }) {
+  if (row.repeatEvery != null && row.repeatEvery >= 2 && row.repeatEvery <= 30) return row.repeatEvery;
+  if (row.repeatDays) return 7;
+  return null;
+}
+
+async function resolveHq(tenantId: number, hqId?: number, hqName?: string) {
+  if (hqId) {
+    const hq = await prisma.hq.findFirst({ where: { id: hqId, tenantId } });
+    if (!hq) throw notFound("HQ not found.");
+    return hq;
+  }
+  const name = hqName?.trim() ?? "";
+  if (!name) throw badRequest("Select an HQ or add one.");
+  if (name.length > 160) throw badRequest("HQ name is too long.");
+  const rows = await prisma.hq.findMany({ where: { tenantId } });
+  const match = rows.find((row) => row.name.toLowerCase() === name.toLowerCase());
+  if (match) return match;
+  try {
+    return await prisma.hq.create({ data: { tenantId, name } });
+  } catch {
+    const again = await prisma.hq.findMany({ where: { tenantId } });
+    const created = again.find((row) => row.name.toLowerCase() === name.toLowerCase());
+    if (created) return created;
+    throw badRequest("Could not add that HQ.");
+  }
+}
+
+/** Write a 2–30 day cycle so the beat repeats without a daily assignment. */
+async function applyCyclePlan(input: {
+  tenantId: number;
+  roles: RoleCode[];
+  userId: number;
+  beatId: number;
+  every: number;
+  days: number[];
+}) {
+  const every = input.every;
+  const offsets = cleanOffsets(input.days, every);
+  const siblings = await prisma.beat.findMany({
+    where: { tenantId: input.tenantId, assigneeId: input.userId, id: { not: input.beatId } },
+    select: { id: true, repeatDays: true, repeatEvery: true },
+  });
+  const siblingPlan = siblings.map((row) => {
+    const rowEvery = storedEvery(row);
+    const before = rowEvery === every ? cleanOffsets(parseRepeat(row.repeatDays), every) : [];
+    return {
+      id: row.id,
+      rowEvery,
+      before,
+      days: before.filter((day) => !offsets.includes(day)),
+    };
+  });
+  for (const row of siblingPlan) {
+    if (row.rowEvery !== every || row.days.length === row.before.length) continue;
+    await prisma.beat.update({
+      where: { id: row.id },
+      data: { repeatDays: formatRepeat(row.days) },
+    });
+  }
+
+  const today = isoDay();
+  const existing = await getSchedule(input.tenantId, input.userId, today);
+  const owned = await prisma.beat.findMany({
+    where: { tenantId: input.tenantId, assigneeId: input.userId },
+    select: { id: true },
+  });
+  const ownedIds = new Set(owned.map((row) => row.id));
+  const sameCycle = existing.cycleLength === every;
+  const start = every === 7 ? weekStartSunday(today) : sameCycle ? existing.startDate : today;
+  const days: Record<string, number | null> = {};
+  for (let day = 0; day < every; day++) {
+    if (offsets.includes(day)) {
+      days[String(day)] = input.beatId;
+      continue;
+    }
+    const prev = sameCycle ? (existing.days[day]?.beatId ?? null) : null;
+    const prevSibling = siblingPlan.find((row) => row.id === prev);
+    if (
+      prev &&
+      prev !== input.beatId &&
+      ownedIds.has(prev) &&
+      prevSibling?.rowEvery === every &&
+      prevSibling.days.includes(day)
+    ) {
+      days[String(day)] = prev;
+      continue;
+    }
+    const other = siblingPlan.find((row) => row.rowEvery === every && row.days.includes(day));
+    days[String(day)] = other && ownedIds.has(other.id) ? other.id : null;
+  }
+
+  await putSchedule({
+    tenantId: input.tenantId,
+    roles: input.roles,
+    userId: input.userId,
+    cycleLength: every,
+    startDate: start,
+    days,
+  });
+  await ensureScheduledDayStops(input.tenantId, input.userId, today);
+
+  const dayIndex = cycleDayIndex(start, every, today);
+  const scheduledId = dayIndex == null ? null : (days[String(dayIndex)] ?? null);
+  const { start: dayStart, end: dayEnd } = parseDay(today);
+  const todayStops = await prisma.beatStop.findMany({
+    where: { tenantId: input.tenantId, userId: input.userId, plannedAt: { gte: dayStart, lte: dayEnd } },
+    select: { id: true, beatId: true, visits: { select: { id: true } } },
+  });
+  const extras = todayStops.filter((stop) => stop.visits.length === 0 && stop.beatId !== scheduledId);
+  if (extras.length) {
+    await prisma.beatStop.deleteMany({ where: { id: { in: extras.map((stop) => stop.id) } } });
+  }
 }
 
 function targetUserId(roles: RoleCode[], selfId: number, requested?: number) {
@@ -269,7 +403,10 @@ function publicBeat(row: {
   id: number;
   name: string;
   territory?: string | null;
-  assigneeId: number;
+  hqId?: number | null;
+  repeatDays?: string | null;
+  repeatEvery?: number | null;
+  assigneeId: number | null;
   notes: string | null;
   assignee?: { name: string } | null;
   members?: { id: number; sequence: number; leadId: number | null; customerId: number | null; lead: { name: string; phone: string; city: string | null } | null; customer: { name: string; phone: string; city: string | null } | null }[];
@@ -279,6 +416,9 @@ function publicBeat(row: {
     id: row.id,
     name: row.name,
     territory: row.territory ?? null,
+    hqId: row.hqId ?? null,
+    repeatEvery: storedEvery(row),
+    repeatDays: row.repeatDays ? cleanOffsets(parseRepeat(row.repeatDays), storedEvery(row) ?? 7) : null,
     assigneeId: row.assigneeId,
     assigneeName: row.assignee?.name ?? null,
     notes: row.notes,
@@ -317,33 +457,80 @@ export async function listBeats(tenantId: number, assigneeId?: number) {
   return rows.map(publicBeat);
 }
 
+export async function listHqs(tenantId: number) {
+  const rows = await prisma.hq.findMany({
+    where: { tenantId },
+    include: { _count: { select: { beats: true } } },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((row) => ({ id: row.id, name: row.name, beatCount: row._count.beats }));
+}
+
+export async function createHq(input: { tenantId: number; roles: RoleCode[]; name: string }) {
+  if (!isManager(input.roles)) throw forbidden("Only a manager can add an HQ.");
+  const hq = await resolveHq(input.tenantId, undefined, input.name);
+  const beatCount = await prisma.beat.count({ where: { hqId: hq.id } });
+  return { id: hq.id, name: hq.name, beatCount };
+}
+
 export async function createBeat(input: {
   tenantId: number;
   roles: RoleCode[];
   name: string;
-  assigneeId: number;
+  assigneeId?: number;
   territory?: string;
+  hqId?: number;
+  hqName?: string;
+  leadIds?: number[];
   notes?: string;
 }) {
   if (!isManager(input.roles)) throw forbidden("Only a manager can create a beat.");
   const name = input.name.trim();
   if (name.length < 2) throw badRequest("Give the beat a name.");
-  const user = await requireSalesUser(input.tenantId, input.assigneeId);
+  const hq = await resolveHq(input.tenantId, input.hqId, input.hqName ?? input.territory);
+  const user = input.assigneeId ? await requireSalesUser(input.tenantId, input.assigneeId) : null;
+  const leadIds = [...new Set(input.leadIds ?? [])];
+  if (leadIds.length) {
+    const leads = await prisma.lead.findMany({ where: { id: { in: leadIds }, tenantId: input.tenantId } });
+    if (leads.length !== leadIds.length) throw badRequest("One of the selected leads was not found.");
+    const blocked = leads.find((lead) => lead.approvalStatus !== "APPROVED" || lead.status === "LOST");
+    if (blocked) throw badRequest(`“${blocked.name}” must be an approved lead before it can go on a beat.`);
+  }
+
   const beat = await prisma.beat.create({
     data: {
       tenantId: input.tenantId,
       name,
-      territory: input.territory?.trim() || null,
-      assigneeId: user.id,
+      hqId: hq.id,
+      territory: hq.name,
+      assigneeId: user?.id ?? null,
       notes: input.notes?.trim() || null,
     },
+  });
+
+  try {
+    for (const leadId of leadIds) {
+      await addBeatMember({
+        tenantId: input.tenantId,
+        roles: input.roles,
+        beatId: beat.id,
+        leadId,
+      });
+    }
+  } catch (error) {
+    await prisma.beat.delete({ where: { id: beat.id } }).catch(() => undefined);
+    throw error;
+  }
+
+  const fresh = await prisma.beat.findFirst({
+    where: { id: beat.id },
     include: {
       assignee: { select: { name: true } },
       members: { include: memberInclude, orderBy: { sequence: "asc" } },
       _count: { select: { members: true } },
     },
   });
-  return publicBeat(beat);
+  return publicBeat(fresh!);
 }
 
 export async function updateBeat(input: {
@@ -365,7 +552,7 @@ export async function updateBeat(input: {
     where: { id: existing.id },
     data: {
       ...(input.name != null ? { name: input.name.trim() } : {}),
-      ...(input.assigneeId != null ? { assigneeId: input.assigneeId } : {}),
+      ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
       ...(input.territory !== undefined ? { territory: input.territory?.trim() || null } : {}),
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
       active: true,
@@ -378,7 +565,7 @@ export async function updateBeat(input: {
   });
 
   // Beat owner changed → member leads must belong to the new executive, and leave other people's beats.
-  if (assigneeChanging) {
+  if (assigneeChanging && beat.assigneeId) {
     const leadIds = beat.members.map((m) => m.leadId).filter((id): id is number => id != null);
     for (const leadId of leadIds) {
       const otherSeats = await prisma.beatMember.findMany({
@@ -407,7 +594,70 @@ export async function updateBeat(input: {
     }
   }
 
+  if (assigneeChanging && existing.assigneeId) {
+    await prisma.beatSchedule.deleteMany({
+      where: { tenantId: input.tenantId, userId: existing.assigneeId, beatId: beat.id },
+    });
+  }
+  if (assigneeChanging && beat.assigneeId && beat.repeatDays) {
+    const every = storedEvery(beat) ?? 7;
+    await applyCyclePlan({
+      tenantId: input.tenantId,
+      roles: input.roles,
+      userId: beat.assigneeId,
+      beatId: beat.id,
+      every,
+      days: cleanOffsets(parseRepeat(beat.repeatDays), every),
+    });
+  }
+
   return publicBeat(beat);
+}
+
+export async function setBeatRepeat(input: {
+  tenantId: number;
+  roles: RoleCode[];
+  beatId: number;
+  weekdays: number[];
+  every?: number;
+}) {
+  if (!isManager(input.roles)) throw forbidden("Only a manager can set the daily plan.");
+  const beat = await prisma.beat.findFirst({
+    where: { id: input.beatId, tenantId: input.tenantId },
+    include: { _count: { select: { members: true } } },
+  });
+  if (!beat) throw notFound("Beat not found.");
+  if (!beat.assigneeId) throw badRequest("Assign this beat to a salesperson before the daily plan.");
+  const every = input.every ?? 7;
+  if (!Number.isInteger(every) || every < 2 || every > 30) {
+    throw badRequest("Repeat every 2 to 30 days.");
+  }
+  const offsets = cleanOffsets(input.weekdays, every);
+  if (input.weekdays.length && !offsets.length) throw badRequest("Pick a day inside the cycle.");
+  if (offsets.length && !beat._count.members) {
+    throw badRequest("Add at least one lead before the daily plan.");
+  }
+  await prisma.beat.update({
+    where: { id: beat.id },
+    data: { repeatDays: formatRepeat(offsets), repeatEvery: offsets.length ? every : null },
+  });
+  await applyCyclePlan({
+    tenantId: input.tenantId,
+    roles: input.roles,
+    userId: beat.assigneeId,
+    beatId: beat.id,
+    every,
+    days: offsets,
+  });
+  const fresh = await prisma.beat.findFirst({
+    where: { id: beat.id },
+    include: {
+      assignee: { select: { name: true } },
+      members: { include: memberInclude, orderBy: { sequence: "asc" } },
+      _count: { select: { members: true } },
+    },
+  });
+  return publicBeat(fresh!);
 }
 
 export async function addBeatMember(input: {
@@ -436,7 +686,7 @@ export async function addBeatMember(input: {
     if (!lead) throw notFound("Lead not found.");
     if (lead.approvalStatus !== "APPROVED") throw badRequest("Approve this lead before adding it to the beat.");
     if (lead.status === "LOST") throw badRequest("Do not put a lost lead on the beat.");
-    if (!lead.assigneeId || lead.assigneeId !== beat.assigneeId) {
+    if (beat.assigneeId && (!lead.assigneeId || lead.assigneeId !== beat.assigneeId)) {
       await prisma.lead.update({
         where: { id: lead.id },
         data: { assigneeId: beat.assigneeId, status: lead.status === "NEW" ? "ASSIGNED" : lead.status },

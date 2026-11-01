@@ -242,7 +242,7 @@ export default function CheckInScreen() {
       />
       {preview ? (
         <Button
-          title="Navigate"
+          title="Directions to shop"
           tone="outline"
           onPress={() => openNavigate(preview.placeLat, preview.placeLng, [preview.address, preview.city].filter(Boolean).join(", "))}
         />

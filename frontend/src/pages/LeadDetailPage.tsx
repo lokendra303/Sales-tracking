@@ -396,10 +396,11 @@ export function LeadDetailPage() {
                 value={form.temperature}
                 onChange={(e) => setForm({ ...form, temperature: e.target.value as Lead["temperature"] })}
               >
-                <option value="HOT">Hot</option>
-                <option value="WARM">Warm</option>
-                <option value="COLD">Cold</option>
+                <option value="HOT">Hot — visit soon</option>
+                <option value="WARM">Warm — interested, follow up</option>
+                <option value="COLD">Cold — not ready yet</option>
               </select>
+              <span className="muted">How soon this shop may buy.</span>
             </label>
           </div>
           <label>

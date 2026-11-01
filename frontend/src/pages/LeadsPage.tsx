@@ -48,7 +48,8 @@ export function LeadsPage() {
   const [mapsLink, setMapsLink] = useState("");
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
-  const [assigneeId, setAssigneeId] = useState("");
+  const [beats, setBeats] = useState<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>([]);
+  const [beatId, setBeatId] = useState("");
   const geoSeq = useRef(0);
   const exec = execFromQuery(searchParams.get("assigneeId"));
   const pendingOnly = searchParams.get("approval") === "pending";
@@ -73,6 +74,13 @@ export function LeadsPage() {
     load().catch(() => undefined);
   }, [accessToken, q, exec, pendingOnly]);
 
+  useEffect(() => {
+    if (!accessToken) return;
+    api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", { token: accessToken })
+      .then(setBeats)
+      .catch(() => setBeats([]));
+  }, [accessToken]);
+
   function resetForm() {
     setName("");
     setPhone("");
@@ -81,7 +89,7 @@ export function LeadsPage() {
     setMapsLink("");
     setCity("");
     setPin(null);
-    setAssigneeId("");
+    setBeatId("");
   }
 
   async function findAddress(override?: string, quiet = false) {
@@ -175,6 +183,10 @@ export function LeadsPage() {
   async function onCreate(event: FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
+    if (!beatId) {
+      setError("Pick a beat. Each beat already belongs to an HQ.");
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice("");
@@ -191,10 +203,10 @@ export function LeadsPage() {
           city: city || undefined,
           latitude: pin?.lat,
           longitude: pin?.lng,
-          assigneeId: assigneeId ? Number(assigneeId) : undefined,
+          beatId: beatId ? Number(beatId) : undefined,
         }),
       });
-      setNotice("Lead saved. The executive can open the map from this shop.");
+      setNotice("Lead saved on that beat. The salesperson is whoever the beat is assigned to.");
       resetForm();
       setAdding(false);
       await load();
@@ -264,7 +276,8 @@ export function LeadsPage() {
       <p className="kicker">Pipeline</p>
       <h1>Leads</h1>
       <p className="muted">
-        Add a shop by hand, or import a sheet. Pin the location so the executive can follow the map to the visit.
+        {leads.length} lead{leads.length === 1 ? "" : "s"}. Add a shop by hand, or import a sheet. Pin the location so the
+        executive can follow the map to the visit.
       </p>
       <ExecFilter people={people} value={exec} onChange={setExec} includeUnassigned />
       <div className="toolbar">
@@ -317,15 +330,16 @@ export function LeadsPage() {
               <input value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} placeholder="Who you meet" />
             </label>
             <label>
-              Assign executive
-              <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
-                <option value="">Unassigned</option>
-                {people.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
+              Beat
+              <select value={beatId} onChange={(e) => setBeatId(e.target.value)} required>
+                <option value="">Select a beat</option>
+                {beats.map((beat) => (
+                  <option key={beat.id} value={beat.id}>
+                    {beat.name} · {beat.territory?.trim() || "No HQ"} · {beat.assigneeName || "No salesperson yet"}
                   </option>
                 ))}
               </select>
+              <span className="muted">Every beat is listed, assigned or not. You do not pick a person here.</span>
             </label>
             <label>
               Address

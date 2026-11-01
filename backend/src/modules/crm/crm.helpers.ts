@@ -87,6 +87,7 @@ export function publicLead(lead: {
     status: lead.status,
     approvalStatus: lead.approvalStatus ?? "APPROVED",
     rejectionNote: lead.rejectionNote ?? null,
+    createdById: lead.createdBy?.id ?? null,
     createdByName: lead.createdBy?.name ?? null,
     temperature: lead.temperature,
     potential: lead.potential ? Number(lead.potential) : null,

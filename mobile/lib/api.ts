@@ -65,6 +65,7 @@ export type Lead = {
   status: string;
   approvalStatus?: string;
   rejectionNote?: string | null;
+  createdById?: number | null;
   createdByName?: string | null;
   temperature: string;
   potential: number | null;
@@ -210,11 +211,22 @@ export type PermanentBeat = {
   id: number;
   name: string;
   territory?: string | null;
-  assigneeId: number;
+  hqId?: number | null;
+  /** Day indexes in the cycle. For 7 days, 0 = Sunday … 6 = Saturday. */
+  repeatDays?: number[] | null;
+  /** Cycle length, 2–30. Null until a repeating plan is saved. */
+  repeatEvery?: number | null;
+  assigneeId: number | null;
   assigneeName: string | null;
   notes: string | null;
   size: number;
   members: BeatMember[];
+};
+
+export type Hq = {
+  id: number;
+  name: string;
+  beatCount: number;
 };
 
 export type BeatPlan = {

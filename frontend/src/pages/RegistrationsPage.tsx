@@ -14,6 +14,19 @@ type Manager = {
   joiningDate: string | null;
   status: string;
   createdAt?: string;
+  loginPassword?: string | null;
+};
+
+type Credential = {
+  id: number;
+  name: string;
+  phone: string;
+  email: string | null;
+  designation: string | null;
+  loginPassword: string | null;
+  status: string;
+  employeeId?: string | null;
+  city?: string | null;
 };
 
 type Row = {
@@ -35,16 +48,8 @@ type Row = {
 };
 
 type Detail = Row & {
-  salesPeople?: {
-    id: number;
-    name: string;
-    phone: string;
-    email: string | null;
-    employeeId: string | null;
-    designation: string | null;
-    city: string | null;
-    status: string;
-  }[];
+  deskUsers?: Credential[];
+  salesPeople?: Credential[];
   counts: {
     users: number;
     leads: number;
@@ -53,6 +58,47 @@ type Detail = Row & {
     customers?: number;
   };
 };
+
+function CredentialTable({ title, empty, people }: { title: string; empty: string; people: Credential[] }) {
+  return (
+    <div style={{ marginTop: 16 }}>
+      <p className="kicker">
+        {title} · {people.length}
+      </p>
+      {people.length ? (
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Mobile</th>
+                <th>Password</th>
+                <th>Email</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((person) => (
+                <tr key={person.id}>
+                  <td>
+                    {person.name}
+                    {person.designation ? <div className="muted small">{person.designation}</div> : null}
+                  </td>
+                  <td>{person.phone}</td>
+                  <td>{person.loginPassword || "Not set yet"}</td>
+                  <td>{person.email ?? "—"}</td>
+                  <td>{person.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted">{empty}</p>
+      )}
+    </div>
+  );
+}
 
 function isSuspended(status: string) {
   return status === "inactive" || status === "suspended";
@@ -314,6 +360,7 @@ export function RegistrationsPage() {
                 <td>
                   <div>{row.manager?.phone ?? "—"}</div>
                   <div className="muted small">{row.manager?.email ?? "No email"}</div>
+                  <div className="muted small">Password: {row.manager?.loginPassword || "Not set yet"}</div>
                 </td>
                 <td>
                   <div className="muted small">
@@ -432,13 +479,14 @@ export function RegistrationsPage() {
               ) : null}
             </div>
             <div>
-              <p className="kicker">Manager</p>
+              <p className="kicker">Company login</p>
               {detail.manager ? (
                 <>
                   <p>
                     <strong>{detail.manager.name}</strong>
                   </p>
                   <p>Mobile: {detail.manager.phone}</p>
+                  <p>Password: {detail.manager.loginPassword || "Not set yet"}</p>
                   <p>Email: {detail.manager.email ?? "—"}</p>
                   <p>Employee ID: {detail.manager.employeeId ?? "—"}</p>
                   <p>Designation: {detail.manager.designation ?? "—"}</p>
@@ -457,37 +505,16 @@ export function RegistrationsPage() {
               )}
             </div>
           </div>
-          {detail.salesPeople?.length ? (
-            <div style={{ marginTop: 16 }}>
-              <p className="kicker">Sales people</p>
-              <div className="table-scroll">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Phone</th>
-                      <th>Email</th>
-                      <th>Emp ID</th>
-                      <th>City</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.salesPeople.map((person) => (
-                      <tr key={person.id}>
-                        <td>{person.name}</td>
-                        <td>{person.phone}</td>
-                        <td>{person.email ?? "—"}</td>
-                        <td>{person.employeeId ?? "—"}</td>
-                        <td>{person.city ?? "—"}</td>
-                        <td>{person.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
+          <CredentialTable
+            title="Desk users"
+            empty="No extra desk logins. Only the company manager can open this portal."
+            people={detail.deskUsers ?? []}
+          />
+          <CredentialTable
+            title="Sales people"
+            empty="No salespeople yet."
+            people={detail.salesPeople ?? []}
+          />
           <div className="seq-btns" style={{ marginTop: 16 }}>
             {detail.status === "pending" ? (
               <>

@@ -94,9 +94,9 @@ export default function MoreScreen() {
       ) : null}
       {isManager(roles) ? (
         <Button
-          title="Beats · assign many leads"
+          title="Proof"
           tone="outline"
-          onPress={() => router.push("/beats" as Href)}
+          onPress={() => router.push("/proof" as Href)}
         />
       ) : null}
       {!isAdmin(roles) ? <Button title="Open reminders" onPress={() => router.push("/notifications")} /> : null}

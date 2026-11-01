@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect, router, useLocalSearchParams, type Href } from "expo-router";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
+import BeatsScreen from "@/app/beats";
 import { ActionRow, Badge, Button, Card, Chip, EmptyState, Screen, ScreenHeader } from "@/components/ui";
 import { VisitHistory } from "@/components/visit-history";
 import { useAuth } from "@/lib/auth";
@@ -68,6 +68,7 @@ function LeadStop({
       : lead.lastVisit?.status === "IN_PROGRESS"
         ? lead.lastVisit.id
         : null;
+  const draft = drafts.find((item) => item.leadId === lead.id || (stop?.customerId != null && item.customerId === stop.customerId));
   const blocked =
     Boolean(beat.activeVisit) || drafts.some((draft) => draft.leadId === lead.id || draft.customerId === stop?.customerId);
   const badge = stop ? stopBadge(stop, sending) : null;
@@ -107,8 +108,15 @@ function LeadStop({
       </ActionRow>
       {sending ? (
         <Text style={styles.leadMeta}>Visit finished on this phone. It sends automatically.</Text>
+      ) : draft && !draft.outcome ? (
+        <Button
+          title="Continue"
+          tone="green"
+          size="sm"
+          onPress={() => router.push({ pathname: "/visit/draft", params: { id: draft.localId } } as unknown as Href)}
+        />
       ) : openVisitId ? (
-        <Button title="Continue visit" tone="green" size="sm" onPress={() => router.push(`/visit/${openVisitId}`)} />
+        <Button title="Continue" tone="green" size="sm" onPress={() => router.push(`/visit/${openVisitId}`)} />
       ) : finished ? (
         <Button title="View visit" tone="green" size="sm" onPress={() => router.push(`/visit/${stop!.visitId}`)} />
       ) : canStart && !blocked ? (
@@ -131,29 +139,16 @@ function LeadStop({
   );
 }
 
-function execFromParam(raw?: string): ExecValue {
-  if (!raw) return "all";
-  const id = Number(raw);
-  return id > 0 ? id : "all";
-}
-
 export default function VisitsScreen() {
   const { accessToken, user } = useAuth();
-  const params = useLocalSearchParams<{ userId?: string }>();
   const manager = isManager(user?.roles);
-  const { people } = useExecutives();
   const offline = useOffline();
   const [beat, setBeat] = useState<BeatToday | null>(null);
   const [shopLeads, setShopLeads] = useState<Lead[]>([]);
   const [tomorrow, setTomorrow] = useState<BeatPlan | null>(null);
   const [drafts, setDrafts] = useState<LocalVisit[]>([]);
-  const [exec, setExec] = useState<ExecValue>(execFromParam(params.userId));
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"today" | "history">("today");
-
-  useEffect(() => {
-    setExec(execFromParam(params.userId));
-  }, [params.userId]);
 
   const load = useCallback(() => {
     if (!accessToken || manager) return;
@@ -195,19 +190,7 @@ export default function VisitsScreen() {
   const assigned = useMemo(() => beatGroups(shopLeads), [shopLeads]);
 
   if (manager) {
-    return (
-      <Screen
-        header={
-          <ScreenHeader
-            title="Visit proof"
-            subtitle="Place photo + GPS · same proof as the desk portal. Tap a visit to open."
-          />
-        }
-      >
-        <ExecFilter people={people} value={exec} onChange={setExec} />
-        <VisitHistory userId={typeof exec === "number" ? exec : undefined} showPerson />
-      </Screen>
-    );
+    return <BeatsScreen embedded />;
   }
 
   return (
@@ -267,7 +250,7 @@ export default function VisitsScreen() {
                 <Card style={styles.todayCard}>
                   <Text style={styles.groupTitle}>No beat targeted for today</Text>
                   <Text style={styles.leadMeta}>
-                    Start today’s visits from the leads under All beats. To make one beat the day’s target, a manager opens Beat on the desk, then Dynamic schedule, and saves that beat on today’s day.
+                    Start today’s visits from the leads under All beats. A manager assigns this beat to you and saves a repeating plan. It then shows up here on those days by itself.
                   </Text>
                 </Card>
               )}

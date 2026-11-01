@@ -62,6 +62,9 @@ export default function RootLayout() {
         <Stack.Screen name="visit/[id]" />
         <Stack.Screen name="sale/new" />
         <Stack.Screen name="notifications" />
+        <Stack.Screen name="proof" />
+        <Stack.Screen name="executive/leads" />
+        <Stack.Screen name="executive/visits" />
         </Stack>
       </FieldProvider>
       </ReminderProvider>

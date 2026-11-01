@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ExecPicker, useExecutives } from "@/components/exec-filter";
+import { useExecutives } from "@/components/exec-filter";
 import { LocationPicker, type PickedPlace } from "@/components/location-picker";
 import { PickMap, type PickMapHandle } from "@/components/pick-map";
 import { INDIA, pickerHtml, type MapMessage } from "@/lib/map-html";
@@ -10,15 +10,17 @@ import { bestFix, loadLocation } from "@/lib/device-location";
 import { ActionRow, Button, Chip, Field, Screen, ScreenHeader } from "@/components/ui";
 import { colors, radius } from "@/lib/theme";
 import { useAuth } from "@/lib/auth";
-import { ApiError, api, isOfflineError } from "@/lib/api";
+import { ApiError, api, isOfflineError, type PermanentBeat } from "@/lib/api";
 import { looksLikeMapsLink, parseMapsLink } from "@/lib/maps-link";
 import { requestId, useOffline } from "@/lib/offline";
 
 export default function NewLeadScreen() {
   const { accessToken } = useAuth();
   const offline = useOffline();
-  const { manager: office, people } = useExecutives();
-  const [assigneeId, setAssigneeId] = useState<number | null>(null);
+  const { manager: office } = useExecutives();
+  const [beats, setBeats] = useState<PermanentBeat[]>([]);
+  const [beatId, setBeatId] = useState<number | null>(null);
+  const [beatOpen, setBeatOpen] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [contactPerson, setContactPerson] = useState("");
@@ -42,6 +44,13 @@ export default function NewLeadScreen() {
   const [potential, setPotential] = useState("");
   const [temperature, setTemperature] = useState<"HOT" | "WARM" | "COLD">("WARM");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!accessToken || !office) return;
+    api<PermanentBeat[]>("/beats", { token: accessToken })
+      .then(setBeats)
+      .catch(() => setBeats([]));
+  }, [accessToken, office]);
 
   async function pinShop() {
     setPinning(true);
@@ -166,8 +175,8 @@ export default function NewLeadScreen() {
 
   async function save(createAnyway = false) {
     if (!accessToken) return;
-    if (office && !assigneeId) {
-      Alert.alert("Assign an executive", "Pick who will own this lead — same as on the desk portal.");
+    if (office && !beatId) {
+      Alert.alert("Pick a beat", "Add the shop to a beat first. The beat already belongs to an HQ.");
       return;
     }
     if (!name.trim() || phone.replace(/\D/g, "").length < 10) {
@@ -191,7 +200,7 @@ export default function NewLeadScreen() {
       temperature,
       createAnyway,
       clientRequestId: requestId("lead"),
-      assigneeId: office && assigneeId ? assigneeId : undefined,
+      beatId: office && beatId ? beatId : undefined,
     };
     try {
       const lead = await api<{ id: number }>("/leads", {
@@ -332,21 +341,57 @@ export default function NewLeadScreen() {
       />
       <Field label="Potential ₹" value={potential} onChangeText={setPotential} keyboardType="numeric" placeholder="Expected value" />
       <View style={styles.field}>
-        <Text style={styles.label}>Temperature</Text>
+        <Text style={styles.label}>How soon they may buy</Text>
+        <Text style={styles.hint}>Hot: visit soon. Warm: they are interested, follow up. Cold: not ready yet, check later.</Text>
         <View style={styles.temps}>
           {(["HOT", "WARM", "COLD"] as const).map((item) => (
-            <Chip key={item} label={item} on={temperature === item} onPress={() => setTemperature(item)} />
+            <Chip
+              key={item}
+              label={item === "HOT" ? "Hot" : item === "WARM" ? "Warm" : "Cold"}
+              on={temperature === item}
+              onPress={() => setTemperature(item)}
+            />
           ))}
         </View>
       </View>
       {office ? (
-        <View style={styles.field}>
-          <Text style={styles.label}>Assign to executive</Text>
-          <Text style={styles.hint}>Only the person you pick will see this lead on their phone.</Text>
-          {people.length ? (
-            <ExecPicker people={people} value={assigneeId} onChange={setAssigneeId} />
+        <View style={[styles.field, beatOpen && styles.menuOpen]}>
+          <Text style={styles.label}>Beat</Text>
+          <Text style={styles.hint}>
+            Every beat is listed, whether a salesperson is assigned or not. The beat already belongs to an HQ. If someone is on the beat, the shop goes to them.
+          </Text>
+          {beats.length ? (
+            <View style={styles.menu}>
+              <Pressable style={styles.menuBtn} onPress={() => setBeatOpen((open) => !open)} accessibilityRole="button">
+                <Text style={styles.menuText} numberOfLines={1}>
+                  {beatLabel(beats.find((beat) => beat.id === beatId)) || "Select a beat"}
+                </Text>
+                <Ionicons name={beatOpen ? "chevron-up" : "chevron-down"} size={16} color="#64748B" />
+              </Pressable>
+              {beatOpen ? (
+                <ScrollView style={styles.menuList} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                  {beats.map((beat) => {
+                    const on = beat.id === beatId;
+                    return (
+                      <Pressable
+                        key={beat.id}
+                        style={[styles.menuItem, on && styles.menuItemOn]}
+                        onPress={() => {
+                          setBeatId(beat.id);
+                          setBeatOpen(false);
+                        }}
+                      >
+                        <Text style={[styles.menuItemText, on && styles.menuItemTextOn]} numberOfLines={2}>
+                          {beatLabel(beat)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
+            </View>
           ) : (
-            <Text style={styles.hint}>Add a sales executive on Team first.</Text>
+            <Text style={styles.hint}>Create an HQ and a beat first, then add the shop here.</Text>
           )}
         </View>
       ) : null}
@@ -354,6 +399,13 @@ export default function NewLeadScreen() {
       <Button title="Save lead" tone="green" onPress={() => save()} loading={loading} />
     </Screen>
   );
+}
+
+function beatLabel(beat?: PermanentBeat) {
+  if (!beat) return "";
+  const hq = beat.territory?.trim() || "No HQ";
+  const who = beat.assigneeName ? beat.assigneeName : "No salesperson yet";
+  return `${beat.name} · ${hq} · ${who}`;
 }
 
 const styles = StyleSheet.create({
@@ -374,4 +426,31 @@ const styles = StyleSheet.create({
   pinTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
   mapPreview: { height: 220, borderRadius: radius.md, overflow: "hidden" },
   map: { height: 220 },
+  menuOpen: { zIndex: 20 },
+  menu: { zIndex: 4 },
+  menuBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  menuText: { flex: 1, color: "#0F172A", fontSize: 14, fontWeight: "600" },
+  menuList: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    marginTop: 6,
+    maxHeight: 280,
+  },
+  menuItem: { paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#fff" },
+  menuItemOn: { backgroundColor: colors.blueSoft },
+  menuItemText: { color: "#0F172A", fontSize: 14 },
+  menuItemTextOn: { color: colors.blue, fontWeight: "700" },
 });

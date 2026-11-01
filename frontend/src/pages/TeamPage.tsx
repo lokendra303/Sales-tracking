@@ -175,7 +175,10 @@ export function TeamPage() {
     <div className="page">
       <p className="kicker">Sales team</p>
       <h1>Team</h1>
-      <p className="muted">Add salespeople for the phone app. They sign in with their mobile number and password.</p>
+      <p className="muted">
+        {salesPeople.length} {salesPeople.length === 1 ? "person" : "people"}. Add salespeople for the phone app. They sign
+        in with their mobile number and password.
+      </p>
 
       <form className="card form wide form-compact" onSubmit={onSubmit}>
         <h2>{editingId ? "Edit salesperson" : "Add salesperson"}</h2>

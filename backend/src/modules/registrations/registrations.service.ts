@@ -77,6 +77,7 @@ function publicManager(user: {
   joiningDate: Date | null;
   status: string;
   createdAt: Date;
+  loginPassword?: string | null;
 }) {
   return {
     id: user.id,
@@ -90,6 +91,27 @@ function publicManager(user: {
     joiningDate: user.joiningDate,
     status: user.status,
     createdAt: user.createdAt,
+    loginPassword: user.loginPassword ?? null,
+  };
+}
+
+function publicCredential(user: {
+  id: number;
+  name: string;
+  phone: string;
+  email: string | null;
+  designation: string | null;
+  loginPassword: string | null;
+  status: string;
+}) {
+  return {
+    id: user.id,
+    name: user.name,
+    phone: user.phone,
+    email: user.email,
+    designation: user.designation,
+    loginPassword: user.loginPassword ?? null,
+    status: user.status,
   };
 }
 
@@ -114,6 +136,7 @@ export async function listRegistrations() {
           joiningDate: true,
           status: true,
           createdAt: true,
+          loginPassword: true,
         },
       },
       _count: {
@@ -178,18 +201,20 @@ export async function getRegistration(tenantId: number) {
   });
   if (!tenant) throw notFound("Company not found.");
 
-  const manager = tenant.users.find((user) => user.roles.some((item) => item.role.code === "MANAGER"));
-  const salesPeople = tenant.users
-    .filter((user) => user.roles.some((item) => item.role.code === "SALES_EXECUTIVE"))
+  const people = tenant.users.filter((user) => !user.platformAdmin);
+  const managers = people.filter((user) => user.roles.some((item) => item.role.code === "MANAGER"));
+  const manager = managers[0] ?? null;
+  const deskUsers = managers.slice(1).map(publicCredential);
+  const salesPeople = people
+    .filter(
+      (user) =>
+        user.roles.some((item) => item.role.code === "SALES_EXECUTIVE") &&
+        !user.roles.some((item) => item.role.code === "MANAGER" || item.role.code === "ADMIN"),
+    )
     .map((user) => ({
-      id: user.id,
-      name: user.name,
-      phone: user.phone,
-      email: user.email,
+      ...publicCredential(user),
       employeeId: user.employeeId,
-      designation: user.designation,
       city: user.city,
-      status: user.status,
     }));
 
   return {
@@ -212,8 +237,10 @@ export async function getRegistration(tenantId: number) {
           joiningDate: manager.joiningDate,
           status: manager.status,
           createdAt: manager.createdAt,
+          loginPassword: manager.loginPassword,
         })
       : null,
+    deskUsers,
     salesPeople,
     counts: {
       users: tenant._count.users,

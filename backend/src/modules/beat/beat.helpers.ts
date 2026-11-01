@@ -62,6 +62,13 @@ export function daysBetween(startIso: string, targetIso: string) {
   return Math.floor((b - a) / 86_400_000);
 }
 
+/** Sunday of the week that contains `iso`, as YYYY-MM-DD. Day index 0 is Sunday. */
+export function weekStartSunday(iso = isoDay()) {
+  const start = parseDay(iso).start;
+  start.setDate(start.getDate() - start.getDay());
+  return isoDay(start);
+}
+
 /** dayIndex in a rotating cycle of length N (0 .. N-1). Null if before start. */
 export function cycleDayIndex(startIso: string, cycleLength: number, targetIso: string) {
   if (!Number.isInteger(cycleLength) || cycleLength < 1) return null;

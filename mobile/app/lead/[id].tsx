@@ -376,6 +376,9 @@ export default function LeadDetailScreen() {
           }}
         />
       ) : null}
+      {sales && lead.lastVisit?.status === "IN_PROGRESS" && lead.lastVisit.id ? (
+        <Button title="Continue" tone="green" onPress={() => router.push(`/visit/${lead.lastVisit!.id}`)} />
+      ) : null}
       {office && lead.approvalStatus === "APPROVED" && lead.status !== "LOST" ? (
         <Button
           title="Add to a beat (multi-lead target)"
@@ -413,6 +416,7 @@ export default function LeadDetailScreen() {
                 onChangeText={(potential) => setForm({ ...form, potential: potential.replace(/[^\d.]/g, "") })}
                 keyboardType="decimal-pad"
               />
+              <Text style={typo.muted}>How soon they may buy. Hot: visit soon. Warm: follow up. Cold: not ready yet.</Text>
               <View style={styles.chips}>
                 {(["HOT", "WARM", "COLD"] as const).map((temp) => (
                   <Chip key={temp} label={tempColor(temp).label} on={form.temperature === temp} onPress={() => setForm({ ...form, temperature: temp })} />

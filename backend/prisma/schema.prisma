@@ -40,6 +40,7 @@ model Tenant {
   followUps FollowUp[]
   beatStops         BeatStop[]
   beats             Beat[]
+  hqs               Hq[]
   beatSchedules     BeatSchedule[]
   beatPlans         BeatPlan[]
   visits            Visit[]
@@ -361,25 +362,48 @@ enum VisitOutcome {
   LATER
 }
 
-/** Permanent named beat (route) assigned to one salesperson. Size = member count. */
+/** Headquarters (HQ). Created before beats so a route can pick one or add one. */
+model Hq {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  name      String   @db.VarChar(160)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  beats  Beat[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("hq")
+}
+
+/** Permanent named beat (route). Salesperson and the weekly plan are set after creation. */
 model Beat {
   id         Int      @id @default(autoincrement())
   tenantId   Int
   name       String   @db.VarChar(120)
   territory  String?  @db.VarChar(160)
-  assigneeId Int
+  hqId       Int?
+  /** Days of the cycle this beat repeats. For 7 days, 0=Sun … 6=Sat. Otherwise day index 0 .. repeatEvery-1. */
+  repeatDays  String?  @db.VarChar(160)
+  /** How many days until the same plan repeats. 2–30. Null with repeatDays means a 7-day week. */
+  repeatEvery Int?
+  assigneeId  Int?
   active     Boolean  @default(true)
   notes      String?  @db.Text
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignee  User           @relation("BeatAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  hq        Hq?            @relation(fields: [hqId], references: [id], onDelete: SetNull)
+  assignee  User?          @relation("BeatAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
   members   BeatMember[]
   schedules BeatSchedule[]
   dayStops  BeatStop[]
 
   @@index([tenantId, assigneeId, active])
+  @@index([hqId])
   @@map("beat")
 }
 

@@ -54,13 +54,18 @@ export async function listLeads(input: {
   q?: string;
   filter?: string;
   assigneeId?: number | "unassigned";
+  /** Also include leads this person created, even when they are not on a beat. */
+  includeCreated?: boolean;
 }) {
-  const managerFilter =
+  const personId = isManager(input.roles) && typeof input.assigneeId === "number" ? input.assigneeId : undefined;
+  const managerFilter: Prisma.LeadWhereInput =
     isManager(input.roles) && input.assigneeId === "unassigned"
       ? { assigneeId: null }
-      : isManager(input.roles) && typeof input.assigneeId === "number"
-        ? { assigneeId: input.assigneeId }
-        : {};
+      : personId && input.includeCreated
+        ? { OR: [{ assigneeId: personId }, { createdById: personId }] }
+        : personId
+          ? { assigneeId: personId }
+          : {};
   const where: Prisma.LeadWhereInput = {
     AND: [
       leadScope(input.tenantId, input.userId, input.roles),
@@ -163,6 +168,8 @@ export async function createLead(input: {
   potential?: number;
   temperature?: Temperature;
   assigneeId?: number;
+  /** Manager adds the shop to a beat. The beat already belongs to an HQ, and its salesperson owns the lead. */
+  beatId?: number;
   createAnyway?: boolean;
   clientRequestId?: string;
 }) {
@@ -203,20 +210,17 @@ export async function createLead(input: {
   }
 
   const manager = isManager(input.roles);
-  if (manager && input.assigneeId) {
-    const assignee = await prisma.user.findFirst({
-      where: {
-        id: input.assigneeId,
-        tenantId: input.tenantId,
-        status: "ACTIVE",
-        roles: { some: { role: { code: "SALES_EXECUTIVE" } } },
-      },
+  let beatForLead: { id: number; assigneeId: number | null } | null = null;
+  if (manager) {
+    if (!input.beatId) throw badRequest("Pick a beat. Each beat already belongs to an HQ.");
+    const beat = await prisma.beat.findFirst({
+      where: { id: input.beatId, tenantId: input.tenantId, active: true },
+      select: { id: true, assigneeId: true },
     });
-    if (!assignee) {
-      throw badRequest("Salesperson not found.");
-    }
+    if (!beat) throw notFound("Beat not found.");
+    beatForLead = beat;
   }
-  const assigneeId = manager ? input.assigneeId ?? null : input.userId;
+  const assigneeId = manager ? beatForLead?.assigneeId ?? null : input.userId;
   const status: LeadStatus = assigneeId ? "ASSIGNED" : "NEW";
   const approvalStatus = "APPROVED";
   const place = splitPlace(input.address, input.mapsLink);
@@ -258,6 +262,20 @@ export async function createLead(input: {
     },
     include: leadInclude,
   });
+
+  if (beatForLead) {
+    const last = await prisma.beatMember.findFirst({
+      where: { beatId: beatForLead.id },
+      orderBy: { sequence: "desc" },
+    });
+    await prisma.beatMember.create({
+      data: {
+        beatId: beatForLead.id,
+        leadId: lead.id,
+        sequence: (last?.sequence ?? 0) + 1,
+      },
+    });
+  }
 
   if (assigneeId && assigneeId !== input.userId) {
     notifyLeadAssigned(assigneeId, { id: lead.id, name: lead.name });

@@ -242,11 +242,7 @@ export default function LeadsScreen() {
       header={
         <ScreenHeader
           title="Leads"
-          subtitle={
-            office
-              ? "Approve, assign, and review — same workflow as the desk portal"
-              : "All your shops. To visit one, open Beat and tap Start visit."
-          }
+          subtitle={`${visible.length} lead${visible.length === 1 ? "" : "s"}`}
           right={
             <Pressable style={styles.add} onPress={() => router.push("/lead/new")} accessibilityLabel="Add lead">
               <Ionicons name="add" size={22} color="#fff" />
@@ -416,7 +412,7 @@ export default function LeadsScreen() {
                 </Pressable>
                 {sales && inProgress && lead.lastVisit?.id ? (
                   <Button
-                    title="Finish visit"
+                    title="Continue"
                     tone="green"
                     size="sm"
                     icon="time-outline"

@@ -8,6 +8,7 @@ import { Badge, Card, EmptyState } from "@/components/ui";
 import { api, type Visit } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { isoDay, money, when } from "@/lib/format";
+import { pickedBeat, pickedHq, personCatalog, type ScopePlace } from "@/lib/person-scope";
 import { colors, shadow, typo } from "@/lib/theme";
 
 type Period = "day" | "7" | "30" | "range";
@@ -178,6 +179,14 @@ function DropMenu({
   );
 }
 
+function visitPlaceLine(places: ScopePlace[] | undefined, leadId: number | null) {
+  if (leadId == null) return "Added by them";
+  const place = places?.find((item) => item.leadId === leadId);
+  if (!place || !place.beats.length) return "Added by them";
+  const beat = place.beats[0];
+  return [beat.hq?.trim() || "No HQ", beat.name].filter(Boolean).join(" · ");
+}
+
 function visitKind(visit: Visit): Exclude<StatusFilter, "all"> | "later" {
   if (visit.status === "IN_PROGRESS") return "in_progress";
   if (visit.outcome === "LATER") return "later";
@@ -194,18 +203,40 @@ function badgeFor(visit: Visit) {
 }
 
 /** Date + status filtered visit list. Managers pass `userId` from the executive filter. */
-export function VisitHistory({ userId, showPerson }: { userId?: number; showPerson?: boolean }) {
+export function VisitHistory({
+  userId,
+  showPerson,
+  places,
+  personName,
+  initialPeriod = "day",
+  initialStatus = "completed",
+}: {
+  userId?: number;
+  showPerson?: boolean;
+  /** When set, HQ and beat menus list only this person's beats. */
+  places?: ScopePlace[];
+  personName?: string;
+  initialPeriod?: Period;
+  initialStatus?: StatusFilter;
+}) {
   const { accessToken } = useAuth();
-  const [period, setPeriod] = useState<Period>("day");
+  const [period, setPeriod] = useState<Period>(initialPeriod);
   const [day, setDay] = useState(() => todayStart());
   const [startDate, setStartDate] = useState(() => startOfDay(shiftDay(new Date(), -6)));
   const [endDate, setEndDate] = useState(() => todayStart());
   const [picking, setPicking] = useState<Picking>(null);
-  const [status, setStatus] = useState<StatusFilter>("completed");
+  const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [rows, setRows] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [photoOnly, setPhotoOnly] = useState(Boolean(showPerson));
+  const [hqPick, setHqPick] = useState("");
+  const [beatPick, setBeatPick] = useState<number | null>(null);
+  const catalog = places ? personCatalog(places) : null;
+  const hq = catalog ? pickedHq(catalog, hqPick) : "";
+  const beatId = catalog && hq ? pickedBeat(catalog, hq, beatPick) : null;
+  const beatGroup = catalog?.hqs.find((item) => item.name === hq)?.beats.find((item) => item.id === beatId) ?? null;
+  const placedHqs = catalog?.hqs.filter((item) => item.name !== "No HQ") ?? [];
 
   const range = useMemo(() => {
     if (period === "day") {
@@ -237,18 +268,27 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
 
   useFocusEffect(load);
 
-  const counts = { all: rows.length, completed: 0, missed: 0, in_progress: 0 };
-  for (const visit of rows) {
+  const scoped = !catalog
+    ? rows
+    : rows.filter((visit) => {
+        if (!hq) return true;
+        if (visit.leadId == null) return hq === "No HQ";
+        if (catalog.noBeatLeadIds.includes(visit.leadId)) return hq === "No HQ" || hq === "";
+        if (hq === "No HQ") return catalog.noBeatLeadIds.includes(visit.leadId);
+        return Boolean(beatGroup?.leadIds.includes(visit.leadId));
+      });
+  const counts = { all: scoped.length, completed: 0, missed: 0, in_progress: 0 };
+  for (const visit of scoped) {
     const kind = visitKind(visit);
     if (kind !== "later") counts[kind] += 1;
   }
-  const shown = (status === "all" ? rows : rows.filter((visit) => visitKind(visit) === status)).filter(
+  const shown = (status === "all" ? scoped : scoped.filter((visit) => visitKind(visit) === status)).filter(
     (visit) => !photoOnly || visit.hasPhoto,
   );
   const isToday = isoDay(day) === isoDay();
   const doneRate = counts.all ? Math.round((counts.completed / counts.all) * 100) : 0;
   const trendMap: Record<string, number> = {};
-  for (const visit of rows) {
+  for (const visit of scoped) {
     if (visitKind(visit) !== "completed") continue;
     const key = dayKey(visit.checkedInAt);
     trendMap[key] = (trendMap[key] ?? 0) + 1;
@@ -290,6 +330,32 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
 
   return (
     <View style={styles.wrap}>
+      {catalog ? (
+        <View style={styles.menuRow}>
+          <DropMenu
+            value={hq}
+            options={[
+              { id: "", label: personName || "This person" },
+              ...placedHqs.map((item) => ({ id: item.name, label: item.name })),
+              ...(catalog.noBeatLeadIds.length ? [{ id: "No HQ", label: `Added by ${personName || "them"}` }] : []),
+            ]}
+            onChange={(next) => {
+              setHqPick(next);
+              setBeatPick(null);
+            }}
+          />
+          {hq && hq !== "No HQ" ? (
+            <DropMenu
+              value={beatId == null ? "" : String(beatId)}
+              options={(placedHqs.find((item) => item.name === hq)?.beats ?? []).map((item) => ({
+                id: String(item.id),
+                label: item.name,
+              }))}
+              onChange={(next) => setBeatPick(Number(next))}
+            />
+          ) : null}
+        </View>
+      ) : null}
       <DropMenu
         value={period}
         options={[
@@ -405,6 +471,11 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
         </Card>
       ) : null}
 
+      {personName ? (
+        <Text style={styles.trendTitle}>
+          {shown.length} visit{shown.length === 1 ? "" : "s"}
+        </Text>
+      ) : null}
       {loading && !rows.length ? (
         <ActivityIndicator color={colors.blue} />
       ) : failed && !rows.length ? (
@@ -428,6 +499,7 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
                   ) : null}
                   <View style={{ flex: 1 }}>
                     <Text style={styles.name}>{visit.name}</Text>
+                    {catalog ? <Text style={styles.proofOn}>{visitPlaceLine(places, visit.leadId)}</Text> : null}
                     <Text style={typo.muted}>
                       {showPerson ? `${visit.userName || "Sales"} · ` : ""}
                       Started {when(visit.checkedInAt)}

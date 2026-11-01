@@ -244,7 +244,7 @@ export function ManagerHome({
                       : "Not in the field"}
                   </Text>
                 </View>
-                <Badge label={row.liveStreaming ? "Live" : active ? "In field" : "Off"} tone={row.liveStreaming || active ? "green" : "slate"} />
+                <Badge label={row.liveStreaming ? "GPS on" : active ? "Working" : "Off"} tone={row.liveStreaming || active ? "green" : "slate"} />
               </Pressable>
             );
           })

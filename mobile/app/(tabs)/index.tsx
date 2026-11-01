@@ -264,7 +264,7 @@ export default function HomeScreen() {
             />
           ) : null}
           <Button
-            title={nextStop.visitStatus === "IN_PROGRESS" ? "Continue visit" : "Check in here"}
+            title={nextStop.visitStatus === "IN_PROGRESS" ? "Continue" : "Check in here"}
             tone="green"
             onPress={() =>
               nextStop.visitId

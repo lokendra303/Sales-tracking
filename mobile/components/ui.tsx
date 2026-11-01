@@ -126,6 +126,7 @@ export function ScreenHeader({
   title,
   subtitle,
   back,
+  onBack,
   fallback = "/(tabs)",
   right,
   align = "left",
@@ -133,6 +134,8 @@ export function ScreenHeader({
   title: string;
   subtitle?: string;
   back?: boolean;
+  /** When set, the arrow runs this instead of leaving the screen. */
+  onBack?: () => void;
   fallback?: Href;
   right?: ReactNode;
   align?: "left" | "center";
@@ -145,7 +148,7 @@ export function ScreenHeader({
           accessibilityRole="button"
           accessibilityLabel="Go back"
           hitSlop={16}
-          onPress={() => goBack(fallback)}
+          onPress={() => (onBack ? onBack() : goBack(fallback))}
           style={styles.iconBtn}
         >
           <Ionicons name="chevron-back" size={22} color={colors.text} />

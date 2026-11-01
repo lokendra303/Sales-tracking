@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LiveCamera } from "@/components/live-camera";
@@ -23,7 +23,9 @@ import { ensureGalleryAccess } from "@/lib/gallery";
 import { keepPhoto } from "@/lib/photos";
 import { openCall, openMapPin, openNavigate, openWhatsApp, when } from "@/lib/format";
 import { isManager, isSales } from "@/lib/roles";
+import { goBack } from "@/lib/nav";
 import { colors, typo } from "@/lib/theme";
+import { getItem, removeItem, setItem } from "@/lib/storage";
 
 const MAX_DEMO_PHOTOS = 6;
 
@@ -46,7 +48,8 @@ export default function VisitScreen() {
     try {
       const data = await api<Visit>(`/visits/${id}`, { token: accessToken });
       setVisit(data);
-      setNotes(data.notes ?? "");
+      const saved = data.status === "IN_PROGRESS" ? await getItem(`visit-notes:${id}`) : null;
+      setNotes(saved != null && saved !== "" ? saved : (data.notes ?? ""));
     } catch {
       setVisit(null);
     } finally {
@@ -59,6 +62,14 @@ export default function VisitScreen() {
       load();
     }, [load]),
   );
+
+  useEffect(() => {
+    if (!id || visit?.status !== "IN_PROGRESS") return;
+    const handle = setTimeout(() => {
+      setItem(`visit-notes:${id}`, notes).catch(() => undefined);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [id, notes, visit?.status]);
 
   useFocusEffect(
     useCallback(() => {
@@ -223,7 +234,8 @@ export default function VisitScreen() {
         token: accessToken,
         body: JSON.stringify({ notes: notes || undefined }),
       });
-      router.replace("/leads");
+      if (id) await removeItem(`visit-notes:${id}`);
+      goBack("/visits");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not save Do later.");
     } finally {
@@ -279,9 +291,11 @@ export default function VisitScreen() {
           afterId: photoJob?.id,
         });
         Alert.alert("Saved on this phone", "Visit complete will send when you are back on Wi-Fi.");
-        router.replace("/visits");
+        if (id) await removeItem(`visit-notes:${id}`);
+        goBack("/visits");
         return;
       }
+      if (id) await removeItem(`visit-notes:${id}`);
       if (outcome === "SUCCESS") {
         router.replace({
           pathname: "/sale/new",
@@ -309,7 +323,7 @@ export default function VisitScreen() {
 
   if (capturing && sales) {
     return (
-      <Screen scroll={false} header={<ScreenHeader title="Shop photo" back align="center" fallback="/visits" />}>
+      <Screen scroll={false} header={<ScreenHeader title="Shop photo" back align="center" onBack={() => setCapturing(false)} />}>
         {busy ? <ActivityIndicator color={colors.blue} /> : null}
         <LiveCamera onCapture={saveLivePhoto} onCancel={() => setCapturing(false)} />
       </Screen>
