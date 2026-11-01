@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ExecFilter, useExecutives, type ExecValue } from "@/components/exec-filter";
+import { useExecutives, type ExecValue } from "@/components/exec-filter";
 import {
   ActionRow,
   Badge,
   Button,
   Card,
-  Chip,
   EmptyState,
   ListScroll,
   Screen,
@@ -28,8 +27,8 @@ type BeatFilter = "all" | "none" | number;
 
 function leadBeatLine(lead: Lead) {
   const beats = lead.beats ?? [];
-  if (!beats.length) return "No beat · No HQ";
-  return beats.map((b) => `${b.name}${b.hq ? ` · HQ ${b.hq}` : " · No HQ"}`).join(" · ");
+  if (!beats.length) return "No beat";
+  return beats.map((b) => b.name).join(", ");
 }
 
 function matchesBeatFilters(lead: Lead, hqFilter: HqFilter, beatFilter: BeatFilter) {
@@ -47,15 +46,6 @@ function matchesBeatFilters(lead: Lead, hqFilter: HqFilter, beatFilter: BeatFilt
   return true;
 }
 
-const filters = [
-  { id: "all", label: "All" },
-  { id: "pending", label: "Approval" },
-  { id: "new", label: "New" },
-  { id: "follow-up", label: "Follow-up" },
-  { id: "interested", label: "Interested" },
-  { id: "won", label: "Won" },
-];
-
 const tabs: { id: StageBucket; label: string }[] = [
   { id: "todo", label: "To do" },
   { id: "later", label: "Later" },
@@ -69,6 +59,50 @@ const emptyText: Record<StageBucket, string> = {
   done: "Nothing finished today yet. Shops you visit or sell to show here.",
   waiting: "No leads are waiting.",
 };
+
+function FilterMenu({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((option) => option.id === value)?.label ?? options[0]?.label ?? "";
+  return (
+    <View style={[styles.menu, open && styles.menuOpen]}>
+      <Pressable style={styles.menuBtn} onPress={() => setOpen((on) => !on)} accessibilityRole="button">
+        <Text style={styles.menuText} numberOfLines={1}>
+          {current}
+        </Text>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color={colors.muted} />
+      </Pressable>
+      {open ? (
+        <View style={styles.menuList}>
+          {options.map((option) => {
+            const on = option.id === value;
+            return (
+              <Pressable
+                key={option.id}
+                style={[styles.menuItem, on && styles.menuItemOn]}
+                onPress={() => {
+                  onChange(option.id);
+                  setOpen(false);
+                }}
+              >
+                <Text style={[styles.menuItemText, on && styles.menuItemTextOn]} numberOfLines={1}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function execFromParam(raw?: string): ExecValue {
   if (!raw) return "all";
@@ -200,18 +234,6 @@ export default function LeadsScreen() {
   // Managers review leads like the desk; customers stay off this list.
   const showCustomers = sales && (searching || tab === "done");
 
-  function startVisit(row: Row) {
-    if (row.lead.lastVisit?.status === "IN_PROGRESS") {
-      router.push(`/visit/${row.lead.lastVisit.id}`);
-      return;
-    }
-    // New visits only from today’s beat (same rule as desk / Beat tab).
-    Alert.alert("Use today’s beat", "Start a new visit from the Beat tab — only shops on today’s assigned beat.", [
-      { text: "Open Beat", onPress: () => router.push("/visits") },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }
-
   return (
     <Screen
       scroll={false}
@@ -223,7 +245,7 @@ export default function LeadsScreen() {
           subtitle={
             office
               ? "Approve, assign, and review — same workflow as the desk portal"
-              : "All your shops · for today’s route list use the Beat tab"
+              : "All your shops. To visit one, open Beat and tap Start visit."
           }
           right={
             <Pressable style={styles.add} onPress={() => router.push("/lead/new")} accessibilityLabel="Add lead">
@@ -249,47 +271,29 @@ export default function LeadsScreen() {
           </Pressable>
         ) : null}
         <SearchBox placeholder="Search name or phone" value={q} onChangeText={setQ} onSubmit={load} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-          <Chip
-            label="All HQ"
-            on={hqFilter === "all"}
-            onPress={() => {
-              setHqFilter("all");
+        <View style={[styles.menus, { zIndex: 3 }]}>
+          <FilterMenu
+            value={hqFilter === "none" ? "none" : hqOptions.some((hq) => hq.toLowerCase() === hqFilter.toLowerCase()) ? hqFilter : "all"}
+            options={[
+              { id: "all", label: "All HQ" },
+              ...hqOptions.map((hq) => ({ id: hq, label: hq })),
+              { id: "none", label: "No HQ" },
+            ]}
+            onChange={(id) => {
+              setHqFilter(id);
               setBeatFilter("all");
             }}
           />
-          {hqOptions.map((hq) => (
-            <Chip
-              key={hq}
-              label={`HQ ${hq}`}
-              on={hqFilter.toLowerCase() === hq.toLowerCase()}
-              onPress={() => {
-                setHqFilter(hq);
-                setBeatFilter("all");
-              }}
-            />
-          ))}
-          <Chip
-            label="No HQ"
-            on={hqFilter === "none"}
-            onPress={() => {
-              setHqFilter("none");
-              setBeatFilter("all");
-            }}
+          <FilterMenu
+            value={beatFilter === "all" || beatFilter === "none" ? beatFilter : String(beatFilter)}
+            options={[
+              { id: "all", label: "All beats" },
+              ...beatOptions.map((beat) => ({ id: String(beat.id), label: beat.name })),
+              { id: "none", label: "No beat" },
+            ]}
+            onChange={(id) => setBeatFilter(id === "all" || id === "none" ? id : Number(id))}
           />
-        </ScrollView>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-          <Chip label="All beats" on={beatFilter === "all"} onPress={() => setBeatFilter("all")} />
-          {beatOptions.map((beat) => (
-            <Chip
-              key={beat.id}
-              label={beat.name}
-              on={beatFilter === beat.id}
-              onPress={() => setBeatFilter(beat.id)}
-            />
-          ))}
-          <Chip label="No beat" on={beatFilter === "none"} onPress={() => setBeatFilter("none")} />
-        </ScrollView>
+        </View>
         {sales ? (
           <>
             {!searching ? (
@@ -335,17 +339,31 @@ export default function LeadsScreen() {
           </>
         ) : (
           <>
-            <View style={styles.filters}>
-              {filters.map((item) => (
-                <Chip
-                  key={item.id}
-                  label={item.id === "pending" ? "To approve" : item.label}
-                  on={filter === item.id}
-                  onPress={() => setFilter(item.id)}
+            <View style={styles.menus}>
+              <FilterMenu
+                value={filter}
+                options={[
+                  { id: "all", label: "All types" },
+                  { id: "pending", label: "To approve" },
+                  { id: "new", label: "New" },
+                  { id: "follow-up", label: "Follow-up" },
+                  { id: "interested", label: "Interested" },
+                  { id: "won", label: "Won" },
+                ]}
+                onChange={setFilter}
+              />
+              {office ? (
+                <FilterMenu
+                  value={exec === "all" || exec === "unassigned" ? exec : String(exec)}
+                  options={[
+                    { id: "all", label: "All executives" },
+                    { id: "unassigned", label: "Unassigned" },
+                    ...people.map((person) => ({ id: String(person.id), label: person.name })),
+                  ]}
+                  onChange={(id) => setExec(id === "all" || id === "unassigned" ? id : Number(id))}
                 />
-              ))}
+              ) : null}
             </View>
-            {office ? <ExecFilter people={people} value={exec} onChange={setExec} includeUnassigned /> : null}
           </>
         )}
       </View>
@@ -360,21 +378,15 @@ export default function LeadsScreen() {
             const inProgress = lead.lastVisit?.status === "IN_PROGRESS";
             const initial = (lead.name.trim()[0] || "?").toUpperCase();
             return (
-              <Card key={`lead-${lead.id}`} style={{ ...styles.leadCard, borderLeftColor: tone.fg, ...shadow }}>
+              <Card key={`lead-${lead.id}`} style={{ ...styles.leadCard, borderLeftColor: tone.fg }}>
                 <Pressable onPress={() => router.push(`/lead/${lead.id}`)} style={styles.leadBody}>
                   <View style={styles.leadTop}>
                     <View style={[styles.avatar, { backgroundColor: tone.bg }]}>
                       <Text style={[styles.avatarText, { color: tone.fg }]}>{initial}</Text>
                     </View>
-                    <View style={{ flex: 1, gap: 6 }}>
-                      <View style={[styles.stage, { backgroundColor: tone.bg }]}>
-                        <Ionicons name={stage.icon} size={14} color={tone.fg} />
-                        <Text style={[styles.stageText, { color: tone.fg }]} numberOfLines={1}>
-                          {stage.label}
-                        </Text>
-                      </View>
+                    <View style={{ flex: 1, gap: 2 }}>
                       <View style={styles.row}>
-                        <Text style={styles.name} numberOfLines={2}>
+                        <Text style={styles.name} numberOfLines={1}>
                           {lead.name}
                         </Text>
                         <Badge
@@ -382,37 +394,43 @@ export default function LeadsScreen() {
                           tone={lead.temperature === "HOT" ? "red" : lead.temperature === "COLD" ? "blue" : "amber"}
                         />
                       </View>
+                      <View style={styles.stage}>
+                        <Ionicons name={stage.icon} size={12} color={tone.fg} />
+                        <Text style={[styles.stageText, { color: tone.fg }]} numberOfLines={1}>
+                          {stage.label}
+                        </Text>
+                      </View>
                     </View>
                   </View>
-                  <Text style={styles.beatLine} numberOfLines={2}>
-                    {leadBeatLine(lead)}
-                  </Text>
-                  <Text style={styles.meta} numberOfLines={2}>
+                  <Text style={styles.meta} numberOfLines={1}>
                     {[
+                      leadBeatLine(lead),
+                      lead.city,
+                      lead.phone,
                       lead.productInterest || lead.businessType,
                       lead.potential ? money(lead.potential) : null,
-                      lead.city,
                       office && lead.assigneeName ? `→ ${lead.assigneeName}` : null,
                       office && lead.createdByName ? `by ${lead.createdByName}` : null,
                       lead.latitude != null ? "Pinned" : null,
                     ]
                       .filter(Boolean)
-                      .join(" · ") || lead.phone}
+                      .join(" · ")}
                   </Text>
-                  <Text style={styles.phoneLine}>{lead.phone}</Text>
                 </Pressable>
-                {sales && stage.canVisit ? (
+                {sales && inProgress && lead.lastVisit?.id ? (
                   <Button
-                    title={inProgress ? "Finish visit" : "Open today’s beat"}
+                    title="Finish visit"
                     tone="green"
-                    icon={inProgress ? "time-outline" : "map-outline"}
-                    onPress={() => startVisit(row)}
+                    size="sm"
+                    icon="time-outline"
+                    onPress={() => router.push(`/visit/${lead.lastVisit!.id}`)}
                   />
                 ) : null}
                 <ActionRow>
                   <Button
                     title="Call"
                     tone="outline"
+                    size="sm"
                     icon="call-outline"
                     flex
                     onPress={() => {
@@ -422,11 +440,12 @@ export default function LeadsScreen() {
                       }
                     }}
                   />
-                  <Button title="WhatsApp" tone="outline" icon="logo-whatsapp" flex onPress={() => openWhatsApp(lead.phone)} />
+                  <Button title="WhatsApp" tone="outline" size="sm" icon="logo-whatsapp" flex onPress={() => openWhatsApp(lead.phone)} />
                   {lead.latitude != null || lead.address || lead.mapsLink ? (
                     <Button
                       title="Map"
                       tone="outline"
+                      size="sm"
                       icon="map-outline"
                       flex
                       onPress={() => {
@@ -443,6 +462,7 @@ export default function LeadsScreen() {
                       <Button
                         title="Approve"
                         tone="green"
+                        size="sm"
                         flex
                         onPress={() => {
                           api(`/leads/${lead.id}/approval`, {
@@ -459,6 +479,7 @@ export default function LeadsScreen() {
                       <Button
                         title="Reject"
                         tone="red"
+                        size="sm"
                         flex
                         onPress={() =>
                           Alert.alert("Reject this lead?", `${lead.name} will stay off the salesperson's visits.`, [
@@ -484,7 +505,7 @@ export default function LeadsScreen() {
                     </>
                   ) : null}
                   {office && lead.approvalStatus !== "PENDING" ? (
-                    <Button title="Open / assign" tone="outline" flex onPress={() => router.push(`/lead/${lead.id}`)} />
+                    <Button title="Open / assign" tone="outline" size="sm" flex onPress={() => router.push(`/lead/${lead.id}`)} />
                   ) : null}
                 </ActionRow>
               </Card>
@@ -535,7 +556,7 @@ export default function LeadsScreen() {
 }
 
 const styles = StyleSheet.create({
-  head: { paddingTop: 8, paddingBottom: 12, gap: 12 },
+  head: { paddingTop: 8, paddingBottom: 12, gap: 12, zIndex: 4 },
   add: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" },
   pendingBanner: {
     flexDirection: "row",
@@ -549,35 +570,60 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   pendingText: { flex: 1, color: colors.text, fontWeight: "700", fontSize: 13 },
-  filters: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  filterChips: { gap: 8, paddingVertical: 2, paddingRight: 8 },
-  beatLine: { color: colors.blue, fontWeight: "700", fontSize: 13 },
+  menus: { flexDirection: "row", gap: 8, zIndex: 2 },
+  menu: { flex: 1 },
+  menuOpen: { zIndex: 3 },
+  menuBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  menuText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: "500" },
+  menuList: {
+    position: "absolute",
+    top: 40,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    overflow: "hidden",
+    ...shadow,
+  },
+  menuItem: { paddingHorizontal: 12, paddingVertical: 9 },
+  menuItemOn: { backgroundColor: "#EEF4FF" },
+  menuItemText: { color: colors.text, fontSize: 14, fontWeight: "400" },
+  menuItemTextOn: { fontWeight: "600", color: colors.blue },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  name: { fontSize: 17, fontWeight: "800", color: colors.text, flex: 1, flexShrink: 1 },
-  meta: { color: colors.muted, flexShrink: 1 },
-  leadCard: { borderLeftWidth: 5, overflow: "hidden" },
-  leadBody: { gap: 8 },
-  leadTop: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  name: { fontSize: 15, fontWeight: "600", color: colors.text, flex: 1, flexShrink: 1 },
+  meta: { color: colors.muted, fontSize: 13, fontWeight: "400", lineHeight: 18, flexShrink: 1 },
+  leadCard: { borderLeftWidth: 3, overflow: "hidden", padding: 12, gap: 8 },
+  leadBody: { gap: 4 },
+  leadTop: { flexDirection: "row", gap: 10, alignItems: "center" },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { fontWeight: "800", fontSize: 18 },
-  phoneLine: { color: colors.ink, fontWeight: "700", fontSize: 13 },
+  avatarText: { fontWeight: "600", fontSize: 14 },
   stage: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
     alignSelf: "flex-start",
     maxWidth: "100%",
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
   },
-  stageText: { fontWeight: "800", fontSize: 12, flexShrink: 1 },
+  stageText: { fontWeight: "400", fontSize: 12, flexShrink: 1 },
   progress: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
@@ -588,8 +634,8 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   progressTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  progressTitle: { color: colors.text, fontWeight: "800", fontSize: 14 },
-  progressText: { color: colors.muted, fontWeight: "700", fontSize: 13 },
+  progressTitle: { color: colors.text, fontWeight: "500", fontSize: 14 },
+  progressText: { color: colors.muted, fontWeight: "400", fontSize: 13 },
   barBg: { height: 8, borderRadius: 8, backgroundColor: "#E5E7EB", overflow: "hidden" },
   barFill: { height: 8, borderRadius: 8, backgroundColor: colors.green },
   tabs: {

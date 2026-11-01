@@ -155,7 +155,10 @@ export async function checkIn(input: {
       (place.customerId != null && open.customerId === place.customerId);
     if (samePlace) return publicVisit(open);
     const where = open.lead?.name ?? open.customer?.name ?? "another shop";
-    throw conflict(`Finish your visit at ${where} first. Only one visit can be open at a time.`, { visitId: open.id });
+    throw conflict(
+      `A visit at ${where} is still open. Open it and tap Do later, then you can start this shop. You can start from anywhere; finish within 300 m.`,
+      { visitId: open.id },
+    );
   }
 
   if (place.lead && place.lead.approvalStatus !== "APPROVED") {
@@ -287,7 +290,13 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
       include: visitInclude,
     }),
     prisma.visit.count({
-      where: { tenantId, userId, status: "COMPLETED", checkedInAt: { gte: start, lte: end } },
+      where: {
+        tenantId,
+        userId,
+        status: "COMPLETED",
+        outcome: { not: "LATER" },
+        checkedInAt: { gte: start, lte: end },
+      },
     }),
     prisma.visit.findMany({
       where: { tenantId, userId, checkedInAt: { gte: start, lte: end } },
@@ -299,15 +308,16 @@ export async function todayBeat(tenantId: number, userId: number, roles: RoleCod
     Boolean((stop.leadId && visit.leadId === stop.leadId) || (stop.customerId && visit.customerId === stop.customerId));
 
   const items = scheduled.stops;
-  const visitedOnBeat = items.filter((stop) => todayVisits.some(samePlace(stop))).length;
+  const countsAsDone = (visit: { status: string; outcome: string | null }) =>
+    visit.status === "IN_PROGRESS" || (visit.status === "COMPLETED" && visit.outcome !== "LATER");
+  const visitedOnBeat = items.filter((stop) => todayVisits.some((visit) => countsAsDone(visit) && samePlace(stop)(visit))).length;
 
   const rows = items.map((stop) => {
     const place = stop.lead ?? stop.customer;
     const today = todayVisits.filter(samePlace(stop));
     const latest =
       today.find((visit) => visit.status === "IN_PROGRESS") ??
-      today.find((visit) => visit.status === "COMPLETED") ??
-      today[0] ??
+      today.find((visit) => visit.status === "COMPLETED" && visit.outcome !== "LATER") ??
       null;
     return {
       id: stop.id || null,
@@ -499,23 +509,32 @@ export async function completeVisit(input: {
   });
   if (!visit) throw notFound("Visit not found.");
   if (visit.status !== "IN_PROGRESS") return publicVisit(visit);
-  if (input.outcome === "SUCCESS" && !visit.photoPath) {
-    throw badRequest("Take a place photo before completing a successful visit.");
-  }
-  if (input.lat == null || input.lng == null) {
-    throw badRequest("Turn on location to finish the visit. You need to be within 300 m of the shop.");
-  }
   const placeLat = asNumber(visit.lead?.latitude ?? visit.customer?.latitude);
   const placeLng = asNumber(visit.lead?.longitude ?? visit.customer?.longitude);
-  if (placeLat == null || placeLng == null) {
-    throw badRequest("This shop has no map pin. Ask your manager to correct the location, then finish the visit.");
-  }
-  const distanceMeters = haversineMeters({ lat: input.lat, lng: input.lng }, { lat: placeLat, lng: placeLng });
-  if (distanceMeters - Math.min(input.accuracy ?? 0, 100) > FINISH_RADIUS_METERS) {
-    throw badRequest(`You are ${distanceMeters} m from the shop. Finish the visit within 300 m.`, "TOO_FAR", {
-      distanceMeters,
-      radiusMeters: FINISH_RADIUS_METERS,
-    });
+  const hasPoint = input.lat != null && input.lng != null;
+  const distanceMeters =
+    hasPoint && placeLat != null && placeLng != null
+      ? haversineMeters({ lat: input.lat!, lng: input.lng! }, { lat: placeLat, lng: placeLng })
+      : null;
+  const nearShop =
+    distanceMeters != null && distanceMeters - Math.min(input.accuracy ?? 0, 100) <= FINISH_RADIUS_METERS;
+
+  if (input.outcome === "SUCCESS") {
+    if (!visit.photoPath) {
+      throw badRequest("Take a place photo before completing a successful visit.");
+    }
+    if (!hasPoint) {
+      throw badRequest("Turn on location to finish the visit. You need to be within 300 m of the shop.");
+    }
+    if (placeLat == null || placeLng == null) {
+      throw badRequest("This shop has no map pin. Ask your manager to correct the location, then finish the visit.");
+    }
+    if (!nearShop) {
+      throw badRequest(`You are ${distanceMeters} m from the shop. Finish the visit within 300 m.`, "TOO_FAR", {
+        distanceMeters,
+        radiusMeters: FINISH_RADIUS_METERS,
+      });
+    }
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -531,7 +550,7 @@ export async function completeVisit(input: {
         checkoutLng: input.lng,
         checkoutAccuracy: input.accuracy,
         distanceMeters,
-        verified: true,
+        verified: input.outcome === "SUCCESS" && nearShop,
       },
       include: visitInclude,
     });
@@ -577,6 +596,63 @@ export async function completeVisit(input: {
       });
     }
 
+    return row;
+  });
+
+  return publicVisit(updated);
+}
+
+export async function postponeVisit(input: { tenantId: number; userId: number; roles: RoleCode[]; visitId: number; notes?: string }) {
+  if (isManager(input.roles)) {
+    throw forbidden("Managers review visits. They do not postpone field visits.");
+  }
+  const visit = await prisma.visit.findFirst({
+    where: { id: input.visitId, tenantId: input.tenantId, userId: input.userId },
+    include: visitInclude,
+  });
+  if (!visit) throw notFound("Visit not found.");
+  if (visit.status !== "IN_PROGRESS") return publicVisit(visit);
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.visit.update({
+      where: { id: visit.id },
+      data: {
+        status: "COMPLETED",
+        outcome: "LATER",
+        notes: input.notes,
+        checkedOutAt: new Date(),
+        verified: false,
+      },
+      include: visitInclude,
+    });
+
+    const followOr = [
+      ...(visit.leadId ? [{ leadId: visit.leadId }] : []),
+      ...(visit.customerId ? [{ customerId: visit.customerId }] : []),
+    ];
+    if (followOr.length) {
+      await tx.followUp.updateMany({
+        where: {
+          tenantId: input.tenantId,
+          userId: input.userId,
+          doneAt: null,
+          type: FollowUpType.VISIT,
+          OR: followOr,
+        },
+        data: { doneAt: new Date() },
+      });
+      await tx.followUp.create({
+        data: {
+          tenantId: input.tenantId,
+          userId: input.userId,
+          leadId: visit.leadId,
+          customerId: visit.customerId,
+          type: "VISIT",
+          dueAt: tomorrowMorning(),
+          notes: input.notes || "Do later. Start again when you are at the shop.",
+        },
+      });
+    }
     return row;
   });
 

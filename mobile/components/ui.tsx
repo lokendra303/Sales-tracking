@@ -261,9 +261,10 @@ type BtnProps = {
   tone?: "blue" | "green" | "red" | "outline" | "ghost";
   icon?: keyof typeof Ionicons.glyphMap;
   flex?: boolean;
+  size?: "md" | "sm";
 };
 
-export function Button({ title, onPress, disabled, loading, tone = "blue", icon, flex }: BtnProps) {
+export function Button({ title, onPress, disabled, loading, tone = "blue", icon, flex, size = "md" }: BtnProps) {
   const { width } = useWindowDimensions();
   const stack = width < 360;
   const columns = width >= 720 ? "23%" : "47%";
@@ -281,7 +282,8 @@ export function Button({ title, onPress, disabled, loading, tone = "blue", icon,
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.btn,
-        flex && (stack ? styles.btnStack : [styles.btnFlex, { flexBasis: columns }]),
+        size === "sm" && styles.btnSm,
+        flex && (stack ? styles.btnStack : size === "sm" ? styles.btnSmFlex : [styles.btnFlex, { flexBasis: columns }]),
         { backgroundColor: palette.bg, borderColor: palette.border, opacity: disabled ? 0.45 : pressed ? 0.88 : 1 },
       ]}
     >
@@ -289,8 +291,13 @@ export function Button({ title, onPress, disabled, loading, tone = "blue", icon,
         <ActivityIndicator color={palette.fg} />
       ) : (
         <View style={styles.btnInner}>
-          {icon ? <Ionicons name={icon} size={18} color={palette.fg} /> : null}
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={[styles.btnText, { color: palette.fg }]}>
+          {icon ? <Ionicons name={icon} size={size === "sm" ? 15 : 18} color={palette.fg} /> : null}
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.75}
+            style={[styles.btnText, size === "sm" && styles.btnTextSm, { color: palette.fg }]}
+          >
             {title}
           </Text>
         </View>
@@ -606,7 +613,10 @@ const styles = StyleSheet.create({
   btnFlex: { flexGrow: 1, flexShrink: 1, flexBasis: "47%", maxWidth: "100%" },
   btnStack: { width: "100%" },
   btnInner: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, maxWidth: "100%" },
+  btnSm: { minHeight: 34, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, borderWidth: 1 },
+  btnSmFlex: { flexGrow: 1, flexShrink: 1, flexBasis: 0 },
   btnText: { fontWeight: "800", fontSize: 14, textAlign: "center", flexShrink: 1 },
+  btnTextSm: { fontWeight: "500", fontSize: 12 },
   chip: {
     alignSelf: "flex-start",
     paddingHorizontal: 14,

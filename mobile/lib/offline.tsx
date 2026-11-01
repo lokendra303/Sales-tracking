@@ -29,6 +29,7 @@ type OfflineState = {
   online: boolean;
   lastSync: string | null;
   enqueue: (job: Omit<OfflineJob, "id" | "createdAt" | "tries">) => Promise<OfflineJob>;
+  drop: (ids: string[]) => Promise<void>;
   flush: () => Promise<void>;
   cacheGet: <T>(key: string) => Promise<T | null>;
   cacheSet: (key: string, value: unknown) => Promise<void>;
@@ -112,6 +113,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   const cacheSet = useCallback(async (key: string, value: unknown) => {
     await persistSet(`cache:${key}`, JSON.stringify(value));
+  }, []);
+
+  const drop = useCallback(async (ids: string[]) => {
+    const skip = new Set(ids);
+    const next = (await readJobs()).filter((job) => !skip.has(job.id) && !(job.afterId && skip.has(job.afterId)));
+    await writeJobs(next);
+    setJobs(next);
   }, []);
 
   const enqueue = useCallback(async (input: Omit<OfflineJob, "id" | "createdAt" | "tries">) => {
@@ -229,11 +237,12 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       online,
       lastSync,
       enqueue,
+      drop,
       flush,
       cacheGet,
       cacheSet,
     }),
-    [jobs, online, lastSync, enqueue, flush, cacheGet, cacheSet],
+    [jobs, online, lastSync, enqueue, drop, flush, cacheGet, cacheSet],
   );
 
   return <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>;

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Animated, StyleSheet, Text, View } from "react-native";
+import { Animated, Platform, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { colors, radius, typo } from "@/lib/theme";
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const AnimatedCircle = Platform.OS === "web" ? Circle : Animated.createAnimatedComponent(Circle);
 
 type RingProps = {
   percent: number;
@@ -56,18 +56,33 @@ export function ProgressRing({
           strokeWidth={thickness}
           fill="none"
         />
-        <AnimatedCircle
-          cx={size / 2}
-          cy={size / 2}
-          r={radiusPx}
-          stroke={color}
-          strokeWidth={thickness}
-          fill="none"
-          strokeLinecap="round"
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={strokeDashoffset}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
+        {Platform.OS === "web" ? (
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radiusPx}
+            stroke={color}
+            strokeWidth={thickness}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={`${circumference} ${circumference}`}
+            strokeDashoffset={circumference * (1 - clamped / 100)}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        ) : (
+          <AnimatedCircle
+            cx={size / 2}
+            cy={size / 2}
+            r={radiusPx}
+            stroke={color}
+            strokeWidth={thickness}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={`${circumference} ${circumference}`}
+            strokeDashoffset={strokeDashoffset}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        )}
       </Svg>
       <Text style={[styles.ringLabel, lightLabel && { color: "#fff" }]}>{label ?? `${clamped}%`}</Text>
       {sublabel ? <Text style={[styles.ringSub, lightLabel && { color: "#BFDBFE" }]}>{sublabel}</Text> : null}

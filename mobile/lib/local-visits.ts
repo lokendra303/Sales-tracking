@@ -55,6 +55,11 @@ export async function saveLocalVisit(visit: LocalVisit) {
   return visit;
 }
 
+export async function removeLocalVisit(localId: string) {
+  const visits = await readAll();
+  await writeAll(visits.filter((visit) => visit.localId !== localId));
+}
+
 export async function pruneLocalVisits(remaining: Set<string>, results: Record<string, number>) {
   const visits = await readAll();
   const keep = visits.filter((visit) => {

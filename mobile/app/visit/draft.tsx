@@ -5,7 +5,7 @@ import { LiveCamera } from "@/components/live-camera";
 import { loadLocation } from "@/lib/device-location";
 import { Button, Card, Field, Screen, ScreenHeader } from "@/components/ui";
 import { assertNearShop, finishReading } from "@/lib/finish-visit";
-import { getLocalVisit, saveLocalVisit, type LocalVisit } from "@/lib/local-visits";
+import { getLocalVisit, removeLocalVisit, saveLocalVisit, type LocalVisit } from "@/lib/local-visits";
 import { useOffline } from "@/lib/offline";
 import { keepPhoto } from "@/lib/photos";
 import { openNavigate, when } from "@/lib/format";
@@ -18,6 +18,7 @@ export default function DraftVisitScreen() {
   const [notes, setNotes] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -81,16 +82,42 @@ export default function DraftVisitScreen() {
     }
   }
 
-  async function complete(outcome: "SUCCESS" | "UNAVAILABLE") {
-    if (!visit) return;
-    if (outcome === "SUCCESS" && !visit.photoUri) {
-      Alert.alert("Place photo required", "Shoot the shop now. The photo stays on this phone until it can upload.");
-      return;
-    }
+  async function doLater() {
+    if (!visit || busy) return;
+    setActionError("");
     setBusy(true);
     try {
-      const point = await finishReading();
-      assertNearShop(point, { lat: visit.placeLat, lng: visit.placeLng });
+      const ids = [visit.checkInJobId, visit.photoJobId, visit.completeJobId].filter((id): id is string => Boolean(id));
+      await Promise.all([offline.drop(ids), removeLocalVisit(visit.localId)]);
+      router.replace("/leads");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not save Do later.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function complete(outcome: "SUCCESS" | "UNAVAILABLE") {
+    if (!visit || busy) return;
+    if (outcome === "SUCCESS" && !visit.photoUri) {
+      setActionError("Shoot the shop now. A successful visit needs a live photo.");
+      return;
+    }
+    setActionError("");
+    setBusy(true);
+    try {
+      let point: { lat?: number; lng?: number; accuracy?: number } = {};
+      if (outcome === "SUCCESS") {
+        const reading = await finishReading();
+        assertNearShop(reading, { lat: visit.placeLat, lng: visit.placeLng });
+        point = reading;
+      } else {
+        try {
+          point = await finishReading();
+        } catch {
+          point = {};
+        }
+      }
       const checkedOutAt = new Date().toISOString();
       const afterId = outcome === "SUCCESS" && visit.photoJobId ? visit.photoJobId : visit.checkInJobId;
       const job = await offline.enqueue({
@@ -117,10 +144,9 @@ export default function DraftVisitScreen() {
         });
         return;
       }
-      Alert.alert("Saved on this phone", "This visit will sync when the network is back.");
       router.replace("/visits");
     } catch (err) {
-      Alert.alert("Could not complete", err instanceof Error ? err.message : "Try again at the shop.");
+      setActionError(err instanceof Error ? err.message : "Could not complete the visit.");
     } finally {
       setBusy(false);
     }
@@ -184,9 +210,13 @@ export default function DraftVisitScreen() {
       {!visit.outcome ? (
         <>
           <Field label="Visit note" value={notes} onChangeText={setNotes} multiline placeholder="What happened" />
+          {actionError ? <Text style={styles.warn}>{actionError}</Text> : null}
           <Button title="Complete visit" tone="green" onPress={() => complete("SUCCESS")} disabled={busy} />
           <Button title="Customer not there" tone="ghost" onPress={() => complete("UNAVAILABLE")} disabled={busy} />
-          <Text style={styles.hint}>Not there = no photo. Success needs the live place photo. Finish within 300 m of the shop pin.</Text>
+          <Button title="Do later" tone="outline" onPress={doLater} disabled={busy} />
+          <Text style={styles.hint}>
+            You can start away from the shop. Finish within 300 m. Do later clears this visit so you can work on other leads.
+          </Text>
         </>
       ) : (
         <Text style={styles.ok}>Waiting to sync.</Text>

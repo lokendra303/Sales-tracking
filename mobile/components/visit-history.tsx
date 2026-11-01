@@ -55,8 +55,9 @@ function rangeLabel(day: Date) {
   return day.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function visitKind(visit: Visit): Exclude<StatusFilter, "all"> {
+function visitKind(visit: Visit): Exclude<StatusFilter, "all"> | "later" {
   if (visit.status === "IN_PROGRESS") return "in_progress";
+  if (visit.outcome === "LATER") return "later";
   return visit.outcome === "UNAVAILABLE" ? "missed" : "completed";
 }
 
@@ -65,6 +66,7 @@ function badgeFor(visit: Visit) {
   const kind = visitKind(visit);
   if (kind === "in_progress") return { label: "In progress", tone: "blue" as const };
   if (kind === "missed") return { label: "Missed", tone: "amber" as const };
+  if (visit.outcome === "LATER") return { label: "Do later", tone: "slate" as const };
   return { label: "Completed", tone: "green" as const };
 }
 
@@ -113,7 +115,10 @@ export function VisitHistory({ userId, showPerson }: { userId?: number; showPers
   useFocusEffect(load);
 
   const counts = { all: rows.length, completed: 0, missed: 0, in_progress: 0 };
-  for (const visit of rows) counts[visitKind(visit)] += 1;
+  for (const visit of rows) {
+    const kind = visitKind(visit);
+    if (kind !== "later") counts[kind] += 1;
+  }
   const shown = (status === "all" ? rows : rows.filter((visit) => visitKind(visit) === status)).filter(
     (visit) => !photoOnly || visit.hasPhoto,
   );

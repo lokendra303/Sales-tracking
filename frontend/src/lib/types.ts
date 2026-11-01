@@ -14,7 +14,7 @@ export type FollowUp = {
 export type Visit = {
   id: number;
   status: "IN_PROGRESS" | "COMPLETED";
-  outcome: "SUCCESS" | "UNAVAILABLE" | null;
+  outcome: "SUCCESS" | "UNAVAILABLE" | "LATER" | null;
   notes: string | null;
   name: string;
   phone: string | null;

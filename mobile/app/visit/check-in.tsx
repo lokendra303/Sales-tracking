@@ -212,10 +212,12 @@ export default function CheckInScreen() {
         ) : locating && !coords ? (
           <Text style={typo.muted}>Getting your GPS location…</Text>
         ) : preview?.distanceMeters != null ? (
-          <Text style={styles.ok}>
+          <Text style={preview.withinRadius ? styles.ok : styles.warn}>
             {preview.distanceMeters} m from the shop pin
-            {coords?.accuracy != null ? ` (GPS ±${Math.round(coords.accuracy)} m)` : ""}. This check-in location is saved
-            with the visit.
+            {coords?.accuracy != null ? ` (GPS ±${Math.round(coords.accuracy)} m)` : ""}.{" "}
+            {preview.withinRadius
+              ? "You can start and finish here."
+              : "You are not at the shop yet. You can still start. Finish within 300 m, or tap Do later on the visit to work on other leads first."}
           </Text>
         ) : preview && !preview.hasPin ? (
           <Text style={styles.warn}>No shop pin yet. You can start. Ask the manager to correct the location before you finish.</Text>

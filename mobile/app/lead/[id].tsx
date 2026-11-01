@@ -376,19 +376,6 @@ export default function LeadDetailScreen() {
           }}
         />
       ) : null}
-      {sales && leadIsOpen(lead) ? (
-        <Button
-          title="Open today’s beat"
-          tone="green"
-          onPress={() =>
-            Alert.alert("Use today’s beat", "Start visits from the Beat tab — only shops on today’s assigned beat.", [
-              { text: "Open Beat", onPress: () => router.push("/visits") },
-              { text: "Cancel", style: "cancel" },
-            ])
-          }
-        />
-      ) : null}
-
       {office && lead.approvalStatus === "APPROVED" && lead.status !== "LOST" ? (
         <Button
           title="Add to a beat (multi-lead target)"

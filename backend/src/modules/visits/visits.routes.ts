@@ -242,6 +242,21 @@ visitsRouter.post(
 );
 
 visitsRouter.post(
+  "/visits/:id/later",
+  asyncHandler(async (req, res) => {
+    const body = z.object({ notes: z.string().optional() }).parse(req.body ?? {});
+    const data = await visits.postponeVisit({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId,
+      roles: req.auth!.roles,
+      visitId: Number(req.params.id),
+      notes: body.notes,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+visitsRouter.post(
   "/visits/:id/confirm",
   asyncHandler(async (req, res) => {
     const data = await visits.confirmVisit(req.auth!.tenantId, req.auth!.roles, Number(req.params.id));

@@ -75,7 +75,9 @@ export function leadStage(lead: Lead, now = new Date()): LeadStage {
 
   const follow = lead.nextFollowUp;
   const due = follow ? new Date(follow.dueAt) : null;
-  const visitedToday = Boolean(visit?.status === "COMPLETED" && visitAt && sameDay(visitAt, now));
+  const visitedToday = Boolean(
+    visit?.status === "COMPLETED" && visit.outcome !== "LATER" && visitAt && sameDay(visitAt, now),
+  );
 
   if (visitedToday) {
     const how = visit?.outcome === "UNAVAILABLE" ? "shop closed / owner away" : "met";

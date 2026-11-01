@@ -33,8 +33,9 @@ function daysAgo(days: number) {
   return isoDay(value);
 }
 
-function visitKind(visit: Visit): Exclude<StatusFilter, "all"> {
+function visitKind(visit: Visit): Exclude<StatusFilter, "all"> | "later" {
   if (visit.status === "IN_PROGRESS") return "in_progress";
+  if (visit.outcome === "LATER") return "later";
   return visit.outcome === "UNAVAILABLE" ? "missed" : "completed";
 }
 
@@ -43,6 +44,7 @@ function stateLabel(visit: Visit) {
   const kind = visitKind(visit);
   if (kind === "in_progress") return "In progress";
   if (kind === "missed") return "Missed";
+  if (kind === "later") return "Do later";
   return "Completed";
 }
 
@@ -80,7 +82,10 @@ export function VisitsPage() {
   }, [accessToken, exec, from, to]);
 
   const counts: Record<StatusFilter, number> = { all: visits.length, completed: 0, missed: 0, in_progress: 0 };
-  for (const visit of visits) counts[visitKind(visit)] += 1;
+  for (const visit of visits) {
+    const kind = visitKind(visit);
+    if (kind !== "later") counts[kind] += 1;
+  }
   const shown = status === "all" ? visits : visits.filter((visit) => visitKind(visit) === status);
   const today = isoDay();
 

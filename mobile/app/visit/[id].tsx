@@ -37,6 +37,7 @@ export default function VisitScreen() {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [demoUris, setDemoUris] = useState<Record<number, string>>({});
   const load = useCallback(async () => {
@@ -212,13 +213,32 @@ export default function VisitScreen() {
     }
   }
 
+  async function doLater() {
+    if (!accessToken || !visit || busy) return;
+    setActionError("");
+    setBusy(true);
+    try {
+      await api(`/visits/${visit.id}/later`, {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ notes: notes || undefined }),
+      });
+      router.replace("/leads");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not save Do later.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function complete(outcome: "SUCCESS" | "UNAVAILABLE") {
-    if (!accessToken || !visit) return;
+    if (!accessToken || !visit || busy) return;
     const photoSaved = offline.jobs.some((job) => job.kind === "visit-photo" && job.path === `/visits/${visit.id}/photo`);
     if (outcome === "SUCCESS" && !visit.hasPhoto && !photoSaved) {
-      Alert.alert("Place photo required", "Shoot the shop now. A successful visit needs proof.");
+      setActionError("Shoot the shop now. A successful visit needs a live photo.");
       return;
     }
+    setActionError("");
     setBusy(true);
     try {
       if (photoSaved) await offline.flush();
@@ -229,8 +249,18 @@ export default function VisitScreen() {
       } catch (err) {
         if (!isOfflineError(err)) throw err;
       }
-      const point = await finishReading();
-      assertNearShop(point, { lat: current.placeLat, lng: current.placeLng });
+      let point: { lat?: number; lng?: number; accuracy?: number } = {};
+      if (outcome === "SUCCESS") {
+        const reading = await finishReading();
+        assertNearShop(reading, { lat: current.placeLat, lng: current.placeLng });
+        point = reading;
+      } else {
+        try {
+          point = await finishReading();
+        } catch {
+          point = {};
+        }
+      }
       const body = { outcome, notes: notes || undefined, checkedOutAt: new Date().toISOString(), ...point };
       try {
         await api(`/visits/${visit.id}/complete`, {
@@ -261,7 +291,7 @@ export default function VisitScreen() {
         router.replace("/visits");
       }
     } catch (err) {
-      Alert.alert("Could not complete", err instanceof Error ? err.message : "Try again.");
+      setActionError(err instanceof Error ? err.message : "Could not complete the visit.");
     } finally {
       setBusy(false);
     }
@@ -446,11 +476,13 @@ export default function VisitScreen() {
       {open && sales ? (
         <>
           <Field label="Visit note" value={notes} onChangeText={setNotes} multiline placeholder="What happened" />
+          {actionError ? <Text style={styles.warn}>{actionError}</Text> : null}
           <Button title="Complete visit" tone="green" onPress={() => complete("SUCCESS")} disabled={busy} />
           <Button title="Customer not there" tone="ghost" onPress={() => complete("UNAVAILABLE")} disabled={busy} />
+          <Button title="Do later" tone="outline" onPress={doLater} disabled={busy} />
           <Text style={styles.hint}>
-            Place proof (live camera) is required for a successful visit. Gallery demo photos and bill photo are optional.
-            Finish within 300 m of the shop pin.
+            You can start a visit from anywhere. Complete it within 300 m of the shop pin. Do later leaves this shop so you
+            can visit other leads, then start this one again when you arrive.
           </Text>
         </>
       ) : null}
@@ -462,7 +494,9 @@ export default function VisitScreen() {
       ) : null}
       {!open ? (
         <Card>
-          <Text style={styles.cardTitle}>{visit.outcome === "UNAVAILABLE" ? "Customer not there" : "Visit completed"}</Text>
+          <Text style={styles.cardTitle}>
+            {visit.outcome === "UNAVAILABLE" ? "Customer not there" : visit.outcome === "LATER" ? "Do later" : "Visit completed"}
+          </Text>
           {visit.notes ? <Text style={typo.muted}>{visit.notes}</Text> : null}
           <Text style={typo.muted}>{visit.checkedOutAt ? `Finished ${when(visit.checkedOutAt)}` : ""}</Text>
           {visit.saleAmount != null ? <Text style={styles.ok}>Sale ₹{visit.saleAmount}</Text> : null}

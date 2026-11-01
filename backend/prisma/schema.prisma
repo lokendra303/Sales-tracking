@@ -358,6 +358,7 @@ enum VisitStatus {
 enum VisitOutcome {
   SUCCESS
   UNAVAILABLE
+  LATER
 }
 
 /** Permanent named beat (route) assigned to one salesperson. Size = member count. */
