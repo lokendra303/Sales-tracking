@@ -184,13 +184,33 @@ a:hover { color: var(--teal-2); }
 .check-row {
   display: flex !important;
   flex-direction: row !important;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
 }
-.check-row input { width: auto; }
+.check-row input { width: auto; margin-top: 3px; flex: none; }
+.card.check-row { padding: 10px 14px; color: var(--text); font-size: inherit; font-weight: 400; }
+.toolbar input,
+.toolbar select { width: auto; flex: 1 1 180px; min-width: 160px; }
+.toolbar .btn { flex: none; }
+.cal { width: min(420px, 100%); display: grid; gap: 8px; margin: 8px 0 16px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-names { color: var(--muted); font-size: 12px; font-weight: 700; text-align: center; }
+.cal-day {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.cal-day.on { background: var(--teal); color: #fff; border-color: var(--teal); }
+.cal-day.today { box-shadow: inset 0 0 0 2px var(--gold); }
+.plan-list { max-height: 320px; overflow: auto; margin-top: 8px; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .row-form { width: auto; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: end; }
 input, .search, select, textarea {

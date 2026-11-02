@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, type ApiUser } from "./api";
+import { api, onAccessTokenChange, refreshAccessToken, type ApiUser } from "./api";
 
 type AuthState = {
   user: ApiUser | null;
@@ -16,6 +16,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    return onAccessTokenChange((token) => {
+      setAccessToken(token);
+      if (!token) setUser(null);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    const timer = window.setInterval(() => {
+      refreshAccessToken().catch(() => undefined);
+    }, 10 * 60 * 1000);
+    const onFocus = () => {
+      refreshAccessToken().catch(() => undefined);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [accessToken]);
 
   useEffect(() => {
     const token = localStorage.getItem("accessToken");

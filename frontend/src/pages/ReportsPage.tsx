@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { API_BASE, api } from "../lib/api";
+import { API_BASE, api, refreshAccessToken } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { Funnel, TeamReport, TargetRow } from "../lib/types";
 
@@ -42,9 +42,18 @@ export function ReportsPage() {
 
   async function exportExcel() {
     if (!accessToken) return;
-    const response = await fetch(`${API_BASE}/reports/export`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    let token = accessToken;
+    let response = await fetch(`${API_BASE}/reports/export`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
+    if (response.status === 401) {
+      token = await refreshAccessToken();
+      if (token) {
+        response = await fetch(`${API_BASE}/reports/export`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    }
     if (!response.ok) {
       setNotice("Could not export.");
       return;

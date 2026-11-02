@@ -19,6 +19,7 @@ type Beat = {
   hqId?: number | null;
   repeatDays?: number[] | null;
   repeatEvery?: number | null;
+  planDates?: string[];
   assigneeId: number | null;
   assigneeName: string | null;
   notes: string | null;
@@ -42,6 +43,16 @@ const CYCLE_PRESETS = [7, 15, 20, 30];
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const DAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+function formatPlanDate(iso: string, withYear = false) {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  return new Date(year, month - 1, day).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    ...(withYear ? { year: "numeric" as const } : {}),
+  });
+}
+
 function isoToday() {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
@@ -52,6 +63,67 @@ function dateForDayIndex(startDate: string, dayIndex: number) {
   const next = new Date(y, m - 1, d);
   next.setDate(next.getDate() + dayIndex);
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+}
+
+function AssignmentCalendar({
+  month,
+  dates,
+  onMonth,
+  onToggle,
+}: {
+  month: Date;
+  dates: string[];
+  onMonth: (next: Date) => void;
+  onToggle: (iso: string) => void;
+}) {
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const first = new Date(year, monthIndex, 1);
+  const pad = (first.getDay() + 6) % 7;
+  const count = new Date(year, monthIndex + 1, 0).getDate();
+  const today = isoToday();
+  const cells: Array<{ iso: string; day: number } | null> = [];
+  for (let i = 0; i < pad; i++) cells.push(null);
+  for (let day = 1; day <= count; day++) {
+    cells.push({
+      iso: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      day,
+    });
+  }
+  return (
+    <div className="cal">
+      <div className="cal-head">
+        <button className="btn" type="button" onClick={() => onMonth(new Date(year, monthIndex - 1, 1))}>
+          Prev
+        </button>
+        <strong>{month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</strong>
+        <button className="btn" type="button" onClick={() => onMonth(new Date(year, monthIndex + 1, 1))}>
+          Next
+        </button>
+      </div>
+      <div className="cal-grid cal-names">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((name) => (
+          <span key={name}>{name}</span>
+        ))}
+      </div>
+      <div className="cal-grid">
+        {cells.map((cell, index) =>
+          cell ? (
+            <button
+              key={cell.iso}
+              type="button"
+              className={`cal-day${dates.includes(cell.iso) ? " on" : ""}${cell.iso === today ? " today" : ""}`}
+              onClick={() => onToggle(cell.iso)}
+            >
+              {cell.day}
+            </button>
+          ) : (
+            <span key={`pad-${index}`} />
+          ),
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function BeatPage() {
@@ -72,9 +144,10 @@ export function BeatPage() {
   const [hqDraft, setHqDraft] = useState("");
   const [hqChoice, setHqChoice] = useState<string>("");
   const [newHqName, setNewHqName] = useState("");
-  const [pickedLeadIds, setPickedLeadIds] = useState<number[]>([]);
   const [planDays, setPlanDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]);
   const [repeatEvery, setRepeatEvery] = useState(7);
+  const [planDates, setPlanDates] = useState<string[]>([]);
+  const [calMonth, setCalMonth] = useState(() => new Date());
   const [hqFilter, setHqFilter] = useState<"all" | "none" | string>("all");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -88,13 +161,6 @@ export function BeatPage() {
     return beat.hqId === Number(hqFilter);
   };
 
-  const createLeads = places.filter((place) => {
-    if (place.kind !== "lead") return false;
-    if (place.status === "LOST" || place.status === "WON") return false;
-    if (place.approvalStatus && place.approvalStatus !== "APPROVED") return false;
-    return true;
-  });
-
   const personBeats = useMemo(
     () => beats.filter((b) => b.assigneeId === userId && matchesHq(b)),
     // matchesHq closes over hqFilter
@@ -107,6 +173,23 @@ export function BeatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [beats, hqFilter],
   );
+
+  const dateRows = useMemo(() => {
+    const rows: { iso: string; beatId: number; beatName: string; person: string; hq: string }[] = [];
+    for (const beat of listedBeats) {
+      for (const iso of beat.planDates ?? []) {
+        rows.push({
+          iso,
+          beatId: beat.id,
+          beatName: beat.name,
+          person: beat.assigneeName ?? "No salesperson",
+          hq: beat.territory || "No HQ",
+        });
+      }
+    }
+    rows.sort((a, b) => a.iso.localeCompare(b.iso) || a.beatName.localeCompare(b.beatName));
+    return rows;
+  }, [listedBeats]);
 
   useEffect(() => {
     if (selectedBeatId && !listedBeats.some((b) => b.id === selectedBeatId)) {
@@ -127,7 +210,6 @@ export function BeatPage() {
     if (place.status === "LOST") return false;
     if (place.kind === "lead" && place.approvalStatus && place.approvalStatus !== "APPROVED") return false;
     if (taken.has(`${place.kind}:${place.id}`)) return false;
-    if (place.kind === "lead" && userId && place.assigneeId && place.assigneeId !== userId) return false;
     if (!q.trim()) return true;
     const hay = `${place.name} ${place.phone} ${place.city ?? ""}`.toLowerCase();
     return hay.includes(q.trim().toLowerCase());
@@ -203,7 +285,8 @@ export function BeatPage() {
     const every = selected?.repeatEvery && selected.repeatEvery >= 2 ? selected.repeatEvery : 7;
     setRepeatEvery(every);
     setPlanDays(selected?.repeatDays?.length ? selected.repeatDays : every === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
-  }, [selected?.id, selected?.repeatDays, selected?.repeatEvery]);
+    setPlanDates(selected?.planDates ?? []);
+  }, [selected?.id, selected?.repeatDays, selected?.repeatEvery, selected?.planDates]);
 
   async function addHq() {
     if (!accessToken || !hqDraft.trim()) return;
@@ -246,13 +329,11 @@ export function BeatPage() {
         body: JSON.stringify({
           name: newName.trim(),
           ...(hqChoice === "new" ? { hqName: newHqName.trim() } : { hqId: Number(hqChoice) }),
-          leadIds: pickedLeadIds,
         }),
       });
       setNewName("");
       setNewHqName("");
-      setPickedLeadIds([]);
-      setNotice(`Created “${data.name}” with ${data.size} leads. Assign a salesperson, then save the repeating plan.`);
+      setNotice(`Created “${data.name}”. Add the shops below, then assign a salesperson.`);
       await Promise.all([loadBeats(), loadHqs()]);
       setSelectedBeatId(data.id);
     } catch (err) {
@@ -305,6 +386,31 @@ export function BeatPage() {
       await loadBeats();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the daily plan.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDates() {
+    if (!accessToken || !selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api<Beat>(`/beats/${selected.id}/dates`, {
+        method: "PUT",
+        token: accessToken,
+        body: JSON.stringify({ dates: planDates }),
+      });
+      const who = data.assigneeName ?? "The salesperson";
+      setNotice(
+        data.planDates?.length
+          ? `${who} gets “${data.name}” on ${data.planDates.length} picked date${data.planDates.length === 1 ? "" : "s"}.`
+          : "Date plan cleared.",
+      );
+      setPlanDates(data.planDates ?? []);
+      await loadBeats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the date plan.");
     } finally {
       setBusy(false);
     }
@@ -426,7 +532,7 @@ export function BeatPage() {
       <p className="kicker">Field plan</p>
       <h1>Beats</h1>
       <p className="muted">
-        Add an HQ, create a beat under it and attach the leads, then assign a salesperson and a repeating plan.
+        Add an HQ, create a beat under it, then add the shops and assign a salesperson.
         Pick any cycle from 2 to 30 days. The phone shows that beat as today’s task on the chosen days. You do not set it again each morning.
       </p>
 
@@ -463,33 +569,10 @@ export function BeatPage() {
       {notice ? <p className="on">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <div className="split">
-        <section>
-          <h2>Team</h2>
-          <div className="list">
-            {people.map((person) => (
-              <button
-                key={person.userId}
-                type="button"
-                className={`card person pick ${userId === person.userId ? "picked" : ""}`}
-                onClick={() => setUserId(person.userId)}
-              >
-                <div>
-                  <strong>{person.name}</strong>
-                  <div className="muted">
-                    {beats.filter((b) => b.assigneeId === person.userId && matchesHq(b)).length} beats
-                  </div>
-                </div>
-              </button>
-            ))}
-            {!people.length ? <p className="muted">No sales executives yet.</p> : null}
-          </div>
-        </section>
-
-        {tab === "beats" ? (
+      {tab === "beats" ? (
           <section>
             <h2>Create beat</h2>
-            <p className="muted">Choose an HQ and the leads. The salesperson is assigned after the beat exists.</p>
+            <p className="muted">Name the beat and choose its HQ. Shops are added on the beat after it exists.</p>
             <div className="toolbar">
               <input
                 value={newName}
@@ -518,30 +601,6 @@ export function BeatPage() {
                 Create
               </button>
             </div>
-            <div className="list" style={{ maxHeight: 220, overflow: "auto" }}>
-              {createLeads.slice(0, 40).map((place) => (
-                <label key={place.id} className="card person" style={{ cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={pickedLeadIds.includes(place.id)}
-                    onChange={() =>
-                      setPickedLeadIds((current) =>
-                        current.includes(place.id) ? current.filter((id) => id !== place.id) : [...current, place.id],
-                      )
-                    }
-                  />
-                  <div>
-                    <strong>{place.name}</strong>
-                    <div className="muted">
-                      {place.phone}
-                      {place.city ? ` · ${place.city}` : ""}
-                    </div>
-                  </div>
-                </label>
-              ))}
-              {!createLeads.length ? <p className="muted">No approved leads to add.</p> : null}
-            </div>
-
             <h2>
               Beats
               {hqFilter !== "all" ? (
@@ -561,7 +620,12 @@ export function BeatPage() {
                         {b.name}
                       </strong>
                       <div className="muted">
-                        {b.size} stops · {b.territory || "No HQ"} · {b.assigneeName ?? "Not assigned"}
+                        {b.assigneeName ?? "No salesperson"} · {b.territory || "No HQ"} · {b.size} stops
+                      </div>
+                      <div className="muted">
+                        {b.planDates?.length
+                          ? `Dates: ${b.planDates.slice(0, 4).map((iso) => formatPlanDate(iso)).join(", ")}${b.planDates.length > 4 ? ` +${b.planDates.length - 4} more` : ""}`
+                          : "No calendar dates"}
                       </div>
                     </div>
                   </button>
@@ -572,6 +636,36 @@ export function BeatPage() {
                     ? "No beats yet. Create one above."
                     : `No beats for ${hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name ?? "this HQ"}. Pick another HQ or create a beat.`}
                 </p>
+              ) : null}
+            </div>
+
+            <h2>Who gets which beat</h2>
+            <p className="muted">
+              Each row is one saved date: the day, the beat, and the salesperson. Click a row to open that beat.
+            </p>
+            <div className="list plan-list">
+              {dateRows.map((row) => (
+                <button
+                  key={`${row.beatId}-${row.iso}`}
+                  type="button"
+                  className={`card person pick ${selectedBeatId === row.beatId ? "picked" : ""}`}
+                  onClick={() => {
+                    setSelectedBeatId(row.beatId);
+                    const [year, month] = row.iso.split("-").map(Number);
+                    if (year && month) setCalMonth(new Date(year, month - 1, 1));
+                  }}
+                >
+                  <div>
+                    <strong>{formatPlanDate(row.iso, true)}</strong>
+                    <div className="muted">
+                      {row.beatName} · {row.hq}
+                    </div>
+                  </div>
+                  <strong>{row.person}</strong>
+                </button>
+              ))}
+              {!dateRows.length ? (
+                <p className="muted">No dates saved yet. Open a beat, pick days on the calendar, then save the assignment plan.</p>
               ) : null}
             </div>
 
@@ -669,6 +763,44 @@ export function BeatPage() {
                     Save repeating plan
                   </button>
                 </div>
+                <p className="muted">
+                  {selected.assigneeName
+                    ? `These dates assign “${selected.name}” to ${selected.assigneeName}. A saved date is used instead of the repeating plan.`
+                    : `These dates are for “${selected.name}”. Choose a salesperson above before you can save them.`}
+                </p>
+                <AssignmentCalendar
+                  month={calMonth}
+                  dates={planDates}
+                  onMonth={setCalMonth}
+                  onToggle={(iso) =>
+                    setPlanDates((current) =>
+                      current.includes(iso) ? current.filter((day) => day !== iso) : [...current, iso].sort(),
+                    )
+                  }
+                />
+                {planDates.length ? (
+                  <div className="chips">
+                    {planDates.map((iso) => (
+                      <button key={iso} type="button" className="chip on" onClick={() => setPlanDates((current) => current.filter((day) => day !== iso))}>
+                        {formatPlanDate(iso, true)} · {selected.name} · {selected.assigneeName ?? "No salesperson"}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted">No dates yet. Click a day on the calendar.</p>
+                )}
+                <div className="toolbar">
+                  <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveDates}>
+                    Save assignment plan
+                  </button>
+                  <span className="muted">
+                    {selected.assigneeId
+                      ? planDates.length
+                        ? `${planDates.length} date${planDates.length === 1 ? "" : "s"} selected. A picked date is used instead of the repeating plan.`
+                        : "Save with no dates to clear this plan."
+                      : "Assign a salesperson before saving dates."}
+                  </span>
+                </div>
                 <div className="list">
                   {selected.members.map((stop, index) => (
                     <article key={stop.id} className="card person">
@@ -728,10 +860,21 @@ export function BeatPage() {
           </section>
         ) : (
           <section>
-            <h2>Schedule · {people.find((p) => p.userId === userId)?.name ?? "Pick someone"}</h2>
+            <h2>Schedule</h2>
             <p className="muted">
               The repeating plan on a beat already repeats every 2 to 30 days. Saving a different cycle here replaces that plan.
             </p>
+            <label className="muted">
+              Salesperson{" "}
+              <select value={userId ?? ""} onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">Select a salesperson</option>
+                {people.map((person) => (
+                  <option key={person.userId} value={person.userId}>
+                    {person.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="toolbar">
               <label className="muted">
                 Cycle days{" "}
@@ -803,7 +946,6 @@ export function BeatPage() {
             </div>
           </section>
         )}
-      </div>
     </div>
   );
 }

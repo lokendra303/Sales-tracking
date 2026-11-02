@@ -197,14 +197,16 @@ export async function refresh(refreshToken: string) {
     throw unauthorized("Session expired. Please log in again.");
   }
 
+  // Keep the same login while the person is still using the app. Replacing it on
+  // every call signed people out when two screens refreshed at the same time.
   await prisma.refreshToken.update({
     where: { id: stored.id },
-    data: { revokedAt: new Date() },
+    data: { expiresAt: refreshExpiry() },
   });
 
   const roles = stored.user.roles.map((item) => item.role.code);
-  const tokens = await issueTokens(stored.user.id, stored.user.tenantId, roles, stored.deviceId ?? undefined);
-  return { user: await publicUser(stored.user), ...tokens };
+  const accessToken = signAccessToken({ sub: stored.user.id, tenantId: stored.user.tenantId, roles });
+  return { user: await publicUser(stored.user), accessToken, refreshToken };
 }
 
 export async function logout(refreshToken?: string) {

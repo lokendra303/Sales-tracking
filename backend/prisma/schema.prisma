@@ -389,6 +389,8 @@ model Beat {
   repeatDays  String?  @db.VarChar(160)
   /** How many days until the same plan repeats. 2–30. Null with repeatDays means a 7-day week. */
   repeatEvery Int?
+  /** Calendar dates (YYYY-MM-DD, comma-separated) when this beat is that salesperson’s task. */
+  planDates   String?  @db.Text
   assigneeId  Int?
   active     Boolean  @default(true)
   notes      String?  @db.Text

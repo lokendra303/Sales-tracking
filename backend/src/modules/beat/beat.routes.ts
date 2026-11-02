@@ -201,6 +201,21 @@ beatRouter.put(
   }),
 );
 
+beatRouter.put(
+  "/beats/:id/dates",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ dates: z.array(z.string()).max(366) }).parse(req.body);
+    const data = await beat.setBeatDates({
+      tenantId: req.auth!.tenantId,
+      roles: req.auth!.roles,
+      beatId: Number(req.params.id),
+      dates: body.dates,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
 beatRouter.post(
   "/beats/:id/members",
   requireRole("MANAGER"),
