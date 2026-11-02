@@ -47,8 +47,9 @@ export function ReportsPage() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (response.status === 401) {
-      token = await refreshAccessToken();
-      if (token) {
+      const renewed = await refreshAccessToken();
+      if (renewed) {
+        token = renewed;
         response = await fetch(`${API_BASE}/reports/export`, {
           headers: { Authorization: `Bearer ${token}` },
         });

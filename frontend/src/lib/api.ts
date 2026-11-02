@@ -53,7 +53,9 @@ let refreshInFlight: Promise<string | null> | null = null;
 
 export function onAccessTokenChange(fn: (access: string | null) => void) {
   tokenListeners.add(fn);
-  return () => tokenListeners.delete(fn);
+  return () => {
+    tokenListeners.delete(fn);
+  };
 }
 
 function skipRefresh(path: string) {
