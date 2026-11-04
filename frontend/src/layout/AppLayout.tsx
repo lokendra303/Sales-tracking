@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { isAdmin, isManager, isPlatformAdmin, roleLabel } from "../lib/roles";
@@ -76,7 +77,9 @@ export function AppLayout() {
           <div className="muted small">Same API as the phone · field work stays on mobile</div>
         </header>
         <main className="main">
-          <Outlet />
+          <Suspense fallback={<div className="center muted">Loading…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

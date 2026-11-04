@@ -1,23 +1,25 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import { isAdmin, isManager, isPlatformAdmin, isSales } from "./lib/roles";
 import { AppLayout } from "./layout/AppLayout";
-import { LoginPage } from "./pages/LoginPage";
-import { HomePage } from "./pages/HomePage";
-import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
-import { TeamPage } from "./pages/TeamPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { LeadsPage } from "./pages/LeadsPage";
-import { LeadDetailPage } from "./pages/LeadDetailPage";
-import { ProfilePage } from "./pages/ProfilePage";
-import { VisitsPage } from "./pages/VisitsPage";
-import { VisitDetailPage } from "./pages/VisitDetailPage";
-import { SalesPage } from "./pages/SalesPage";
-import { MapPage } from "./pages/MapPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { BeatPage } from "./pages/BeatPage";
-import { RegisterPage } from "./pages/RegisterPage";
-import { RegistrationsPage } from "./pages/RegistrationsPage";
+
+const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
+const HomePage = lazy(() => import("./pages/HomePage").then((m) => ({ default: m.HomePage })));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage })));
+const TeamPage = lazy(() => import("./pages/TeamPage").then((m) => ({ default: m.TeamPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const LeadsPage = lazy(() => import("./pages/LeadsPage").then((m) => ({ default: m.LeadsPage })));
+const LeadDetailPage = lazy(() => import("./pages/LeadDetailPage").then((m) => ({ default: m.LeadDetailPage })));
+const ProfilePage = lazy(() => import("./pages/ProfilePage").then((m) => ({ default: m.ProfilePage })));
+const VisitsPage = lazy(() => import("./pages/VisitsPage").then((m) => ({ default: m.VisitsPage })));
+const VisitDetailPage = lazy(() => import("./pages/VisitDetailPage").then((m) => ({ default: m.VisitDetailPage })));
+const SalesPage = lazy(() => import("./pages/SalesPage").then((m) => ({ default: m.SalesPage })));
+const MapPage = lazy(() => import("./pages/MapPage").then((m) => ({ default: m.MapPage })));
+const ReportsPage = lazy(() => import("./pages/ReportsPage").then((m) => ({ default: m.ReportsPage })));
+const BeatPage = lazy(() => import("./pages/BeatPage").then((m) => ({ default: m.BeatPage })));
+const RegisterPage = lazy(() => import("./pages/RegisterPage").then((m) => ({ default: m.RegisterPage })));
+const RegistrationsPage = lazy(() => import("./pages/RegistrationsPage").then((m) => ({ default: m.RegistrationsPage })));
 
 export function App() {
   const { ready, user } = useAuth();
@@ -25,20 +27,24 @@ export function App() {
 
   if (!user) {
     return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="center muted">Loading…</div>}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
 
   if (isSales(user.roles)) {
     return (
-      <Routes>
-        <Route path="*" element={<LoginPage blocked />} />
-      </Routes>
+      <Suspense fallback={<div className="center muted">Loading…</div>}>
+        <Routes>
+          <Route path="*" element={<LoginPage blocked />} />
+        </Routes>
+      </Suspense>
     );
   }
 
