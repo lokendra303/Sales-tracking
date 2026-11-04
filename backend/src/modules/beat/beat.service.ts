@@ -489,6 +489,32 @@ export async function createHq(input: { tenantId: number; roles: RoleCode[]; nam
   return { id: hq.id, name: hq.name, beatCount };
 }
 
+export async function deleteHqs(tenantId: number, roles: RoleCode[], ids: number[]) {
+  if (!isManager(roles)) throw forbidden("Only a manager can delete an HQ.");
+  const unique = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))].slice(0, 50);
+  if (!unique.length) throw badRequest("Select at least one HQ.");
+  const found = await prisma.hq.findMany({
+    where: { tenantId, id: { in: unique } },
+    select: { id: true, name: true },
+  });
+  if (!found.length) throw notFound("Those headquarters were not found.");
+  const hqIds = found.map((hq) => hq.id);
+  await prisma.$transaction([
+    ...found.map((hq) =>
+      prisma.beat.updateMany({
+        where: { tenantId, hqId: hq.id, territory: hq.name },
+        data: { territory: null },
+      }),
+    ),
+    prisma.beat.updateMany({
+      where: { tenantId, hqId: { in: hqIds } },
+      data: { hqId: null },
+    }),
+    prisma.hq.deleteMany({ where: { tenantId, id: { in: hqIds } } }),
+  ]);
+  return { deleted: hqIds.length };
+}
+
 export async function createBeat(input: {
   tenantId: number;
   roles: RoleCode[];
@@ -547,6 +573,38 @@ export async function createBeat(input: {
     },
   });
   return publicBeat(fresh!);
+}
+
+export async function deleteBeat(tenantId: number, roles: RoleCode[], id: number) {
+  if (!isManager(roles)) throw forbidden("Only a manager can delete a beat.");
+  const existing = await prisma.beat.findFirst({ where: { id, tenantId }, select: { id: true, name: true } });
+  if (!existing) throw notFound("Beat not found.");
+  await prisma.$transaction([
+    prisma.beatMember.deleteMany({ where: { beatId: existing.id } }),
+    prisma.beatSchedule.deleteMany({ where: { beatId: existing.id } }),
+    prisma.beatStop.updateMany({ where: { beatId: existing.id }, data: { beatId: null } }),
+    prisma.beat.delete({ where: { id: existing.id } }),
+  ]);
+  return { deleted: true, name: existing.name };
+}
+
+export async function deleteBeats(tenantId: number, roles: RoleCode[], ids: number[]) {
+  if (!isManager(roles)) throw forbidden("Only a manager can delete a beat.");
+  const unique = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))].slice(0, 100);
+  if (!unique.length) throw badRequest("Select at least one beat.");
+  const found = await prisma.beat.findMany({
+    where: { tenantId, id: { in: unique } },
+    select: { id: true },
+  });
+  const beatIds = found.map((beat) => beat.id);
+  if (!beatIds.length) throw notFound("Those beats were not found.");
+  await prisma.$transaction([
+    prisma.beatMember.deleteMany({ where: { beatId: { in: beatIds } } }),
+    prisma.beatSchedule.deleteMany({ where: { beatId: { in: beatIds } } }),
+    prisma.beatStop.updateMany({ where: { beatId: { in: beatIds } }, data: { beatId: null } }),
+    prisma.beat.deleteMany({ where: { tenantId, id: { in: beatIds } } }),
+  ]);
+  return { deleted: beatIds.length };
 }
 
 export async function updateBeat(input: {

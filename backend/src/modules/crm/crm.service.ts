@@ -1,4 +1,5 @@
 import { FollowUpType, LeadStatus, Prisma, Temperature } from "@prisma/client";
+import * as XLSX from "xlsx";
 import { prisma } from "../../lib/prisma.js";
 import { badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { geocodeAddress, looksLikeMapsLink, parseCoord } from "../../lib/geocode.js";
@@ -99,7 +100,7 @@ export async function listLeads(input: {
     where,
     include: leadInclude,
     orderBy: { updatedAt: "desc" },
-    take: 100,
+    take: 500,
   });
 
   let customers: Awaited<ReturnType<typeof listCustomers>> = [];
@@ -182,17 +183,22 @@ export async function createLead(input: {
     if (replay) return publicLead(replay);
   }
 
-  const phone = parseMobile(input.phone);
-  if (!phone) throw badRequest("Enter a 10-digit mobile number.");
+  const rawPhone = input.phone.trim();
+  const phone = rawPhone ? parseMobile(rawPhone) : "";
+  if (rawPhone && !phone) throw badRequest("Enter a 10-digit mobile number, or leave it blank.");
 
   const settings = await prisma.tenantSettings.findUnique({ where: { tenantId: input.tenantId } });
-  const existingLead = await prisma.lead.findFirst({
-    where: { tenantId: input.tenantId, phone },
-    include: { assignee: { select: { id: true, name: true } } },
-  });
-  const existingCustomer = await prisma.customer.findFirst({
-    where: { tenantId: input.tenantId, phone },
-  });
+  const existingLead = phone
+    ? await prisma.lead.findFirst({
+        where: { tenantId: input.tenantId, phone },
+        include: { assignee: { select: { id: true, name: true } } },
+      })
+    : null;
+  const existingCustomer = phone
+    ? await prisma.customer.findFirst({
+        where: { tenantId: input.tenantId, phone },
+      })
+    : null;
 
   if ((existingLead || existingCustomer) && !input.createAnyway) {
     throw conflict("A record with this phone number already exists.", {
@@ -284,16 +290,292 @@ export async function createLead(input: {
   return publicLead(lead);
 }
 
-function cell(row: Record<string, unknown>, keys: string[]) {
+function headerKey(key: string) {
+  return key.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isShopHeader(key: string) {
+  return (
+    key === "retailername" ||
+    key === "retailer" ||
+    key.includes("retailer") ||
+    key.includes("salon") ||
+    key.includes("outlet") ||
+    key.includes("parlour") ||
+    key.includes("parlor") ||
+    key === "shopname" ||
+    key === "partyname" ||
+    key === "customername" ||
+    key === "firmname" ||
+    key === "dealername"
+  );
+}
+
+function isPhoneHeader(key: string) {
+  if (key.includes("stockist")) return false;
+  return (
+    key === "phone" ||
+    key === "phoneno" ||
+    key === "mobileno" ||
+    key === "contactno" ||
+    key === "mobile" ||
+    /^mobile\d+$/.test(key) ||
+    key.includes("mobile") ||
+    key.includes("phone") ||
+    key.includes("contactnumber") ||
+    key.includes("whatsapp")
+  );
+}
+
+function scoreHeaderRow(row: unknown) {
+  if (!Array.isArray(row)) return 0;
+  const keys = row.map((item) => headerKey(String(item ?? ""))).filter(Boolean);
+  let score = 0;
+  if (keys.some(isShopHeader)) score += 10;
+  if (keys.some(isPhoneHeader)) score += 6;
+  if (keys.some((key) => key === "beatname" || key === "beat")) score += 2;
+  if (keys.some((key) => key.includes("address"))) score += 2;
+  return score;
+}
+
+/** Pick the tab that lists shops. Beat-plan files keep the route list on the first tab and the shops on another. */
+export function readLeadSheet(buffer: Buffer) {
+  const book = XLSX.read(buffer, { type: "buffer" });
+  if (!book.SheetNames.length) throw badRequest("The Excel file has no sheet.");
+
+  let best: { name: string; headerIndex: number; score: number; dataRows: number } | null = null;
+  for (const name of book.SheetNames) {
+    const sheet = book.Sheets[name];
+    if (!sheet) continue;
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+    let headerIndex = 0;
+    let score = 0;
+    for (let i = 0; i < Math.min(matrix.length, 8); i++) {
+      const rowScore = scoreHeaderRow(matrix[i]);
+      if (rowScore > score) {
+        score = rowScore;
+        headerIndex = i;
+      }
+    }
+    const dataRows = Math.max(0, matrix.length - headerIndex - 1);
+    if (!best || score > best.score || (score === best.score && dataRows > best.dataRows)) {
+      best = { name, headerIndex, score, dataRows };
+    }
+  }
+
+  if (!best || best.score < 10) {
+    throw badRequest(
+      best && best.score >= 2
+        ? "This tab lists beats, not shops. Shop names and mobiles are on the other tab of the same file. Upload it again and that tab will be used."
+        : "No shop list found. The sheet needs a retailer or salon name and a mobile number.",
+    );
+  }
+
+  const sheet = book.Sheets[best.name];
+  const rows = XLSX.utils
+    .sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false, range: best.headerIndex })
+    .slice(0, 500)
+    .map((row, index) => ({ ...row, __excelRow: best.headerIndex + index + 2 }));
+  const skippedBeatTab = book.SheetNames.length > 1 && book.SheetNames[0] !== best.name;
+  return {
+    rows,
+    sheetName: best.name.trim() || "Sheet",
+    note: skippedBeatTab
+      ? `Shops are read from “${best.name.trim()}”. The first tab only lists beats, so it was skipped.`
+      : "",
+  };
+}
+
+function textValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(Math.round(value));
+  if (value == null) return "";
+  return String(value).trim();
+}
+
+function cell(row: Record<string, unknown>, keys: string[], loose: string[] = []) {
+  const entries = Object.entries(row).filter(([key]) => key !== "__excelRow");
   for (const key of keys) {
-    const match = Object.keys(row).find((item) => item.trim().toLowerCase().replace(/[\s_]+/g, "") === key);
+    const match = entries.find(([item]) => headerKey(item) === key);
     if (!match) continue;
-    const value = row[match];
-    if (value == null) continue;
-    const text = String(value).trim();
+    const text = textValue(match[1]);
+    if (text) return text;
+  }
+  for (const hint of loose) {
+    const match = entries.find(([item]) => headerKey(item).includes(hint));
+    if (!match) continue;
+    const text = textValue(match[1]);
     if (text) return text;
   }
   return "";
+}
+
+/** Accept a 10-digit mobile, or 91 / leading 0 in front of one. */
+function flexibleMobile(raw: string) {
+  if (!raw || /[a-z@]/i.test(raw)) return null;
+  let digits = raw.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length !== 10) return null;
+  return digits;
+}
+
+function mobileFromRow(row: Record<string, unknown>) {
+  const raws: string[] = [];
+  for (const [key, value] of Object.entries(row)) {
+    const norm = headerKey(key);
+    if (!isPhoneHeader(norm)) continue;
+    const raw = textValue(value);
+    if (raw) raws.push(raw);
+  }
+  for (const raw of raws) {
+    const phone = flexibleMobile(raw);
+    if (phone) return { phone, raw };
+  }
+  return { phone: "", raw: raws[0] ?? "" };
+}
+
+function sheetNotes(row: Record<string, unknown>) {
+  const parts: string[] = [];
+  const add = (label: string, keys: string[]) => {
+    const value = cell(row, keys);
+    if (value) parts.push(`${label}: ${value}`);
+  };
+  add("State", ["state"]);
+  add("HQ", ["hqname", "hq"]);
+  add("MSL", ["mslno", "msl"]);
+  add("Email", ["emailid", "email"]);
+  add("DOB", ["dob", "dateofbirth"]);
+  add("Anniversary", ["anniversarydate", "anniversary"]);
+  add("Store opening", ["storeopeningdate", "openingdate"]);
+  const written = cell(row, ["notes", "note", "remark"]);
+  if (written) parts.push(written);
+  return parts.join("\n");
+}
+
+type ParsedImportRow = {
+  row: number;
+  name: string;
+  phone: string;
+  rawPhone: string;
+  contactPerson: string;
+  businessType: string;
+  address: string;
+  city: string;
+  notes: string;
+  potential?: number;
+  mapsLink: string;
+  latitude: number | null;
+  longitude: number | null;
+  beatName: string;
+  hqName: string;
+  ready: boolean;
+  reason: string;
+  blank: boolean;
+};
+
+function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImportRow {
+  const excelRow = raw.__excelRow;
+  const rowNumber = typeof excelRow === "number" ? excelRow : index + 2;
+  const name = cell(
+    raw,
+    ["retailername", "retailer", "shopname", "businessname", "outletname", "partyname", "customername", "firmname", "dealername", "name", "shop", "business"],
+    ["retailer", "salon", "outlet", "parlour", "parlor"],
+  );
+  const { phone, raw: rawPhone } = mobileFromRow(raw);
+  const beatName = cell(raw, ["beatname", "beat"]);
+  const hqName = cell(raw, ["hqname", "hq"]);
+  const contactPerson =
+    cell(raw, ["contactpersonname", "contactperson", "person", "ownername"]) ||
+    cell(raw, ["storemgrname", "storemanager", "managername"]);
+  const businessType = cell(raw, ["speciality", "specialty", "businesstype", "type"]) || cell(raw, ["category"]);
+  const street = cell(raw, ["completeaddress", "address", "fulladdress"]);
+  const pin = cell(raw, ["pincode", "pin", "postalcode", "zip", "zipcode"]);
+  const address = [street, pin].filter(Boolean).join(", ");
+  const city = cell(raw, ["cityname", "city", "town", "citytown"], ["city"]);
+  const mapsLink = cell(raw, ["mapslink", "googlemapslink", "maplink", "mapsurl", "googlemaps"]);
+  const latitude = parseCoord(cell(raw, ["latitude", "lat"]), -90, 90) ?? null;
+  const longitude = parseCoord(cell(raw, ["longitude", "lng", "lon"]), -180, 180) ?? null;
+  const potentialRaw = cell(raw, ["avgsales", "potential", "value", "amount"]);
+  const potentialNum = potentialRaw ? Number(potentialRaw.replace(/[^\d.]/g, "")) : undefined;
+  const repeatedHeader = headerKey(name) === "retailername" || headerKey(beatName) === "beatname";
+  const blank = repeatedHeader || (!name && !phone && !rawPhone && !beatName && !street && !city);
+  let reason = "";
+  if (!blank) {
+    if (!name) reason = "Retailer name is missing.";
+    else if (rawPhone && !phone) reason = `Mobile ${rawPhone} is not a 10-digit number.`;
+  }
+  return {
+    row: rowNumber,
+    name,
+    phone,
+    rawPhone,
+    contactPerson,
+    businessType,
+    address,
+    city,
+    notes: sheetNotes(raw),
+    potential: potentialNum && Number.isFinite(potentialNum) ? potentialNum : undefined,
+    mapsLink,
+    latitude,
+    longitude,
+    beatName,
+    hqName,
+    ready: !blank && !reason,
+    reason,
+    blank,
+  };
+}
+
+async function markImportDuplicates(tenantId: number, rows: ParsedImportRow[]) {
+  const phones = rows.filter((row) => row.ready && row.phone).map((row) => row.phone);
+  const [existingLeads, existingCustomers] = await Promise.all([
+    prisma.lead.findMany({ where: { tenantId, phone: { in: phones } }, select: { phone: true } }),
+    prisma.customer.findMany({ where: { tenantId, phone: { in: phones } }, select: { phone: true } }),
+  ]);
+  const taken = new Set([...existingLeads.map((item) => item.phone), ...existingCustomers.map((item) => item.phone)]);
+  const seen = new Set<string>();
+  return rows.map((row) => {
+    if (!row.ready || !row.phone) return row;
+    if (seen.has(row.phone)) return { ...row, ready: false, reason: "This mobile is repeated in the sheet." };
+    seen.add(row.phone);
+    if (taken.has(row.phone)) return { ...row, ready: false, reason: "This mobile is already a lead." };
+    return row;
+  });
+}
+
+function publicImportRow(row: ParsedImportRow) {
+  return {
+    row: row.row,
+    name: row.name,
+    phone: row.phone,
+    rawPhone: row.rawPhone,
+    contactPerson: row.contactPerson,
+    businessType: row.businessType,
+    address: row.address,
+    city: row.city,
+    beatName: row.beatName,
+    hqName: row.hqName,
+    ready: row.ready,
+    reason: row.reason,
+  };
+}
+
+export async function previewLeadImport(input: {
+  tenantId: number;
+  userId: number;
+  roles: RoleCode[];
+  rows: Record<string, unknown>[];
+}) {
+  if (!isManager(input.roles)) throw forbidden("Only managers import leads.");
+  const parsed = await markImportDuplicates(
+    input.tenantId,
+    input.rows.map(parseImportRow).filter((row) => !row.blank),
+  );
+  return {
+    rows: parsed.map(publicImportRow),
+    ready: parsed.filter((row) => row.ready).length,
+    skipped: parsed.filter((row) => !row.ready).length,
+  };
 }
 
 export async function importLeads(input: {
@@ -301,95 +583,198 @@ export async function importLeads(input: {
   userId: number;
   roles: RoleCode[];
   rows: Record<string, unknown>[];
+  beatByName: Record<string, number>;
+  keepRows?: number[];
 }) {
   if (!isManager(input.roles)) {
     throw forbidden("Only managers import leads.");
   }
-
-  const people = await prisma.user.findMany({
-    where: { tenantId: input.tenantId, roles: { some: { role: { code: "SALES_EXECUTIVE" } } } },
-    select: { id: true, phone: true, name: true },
+  const beatIds = [...new Set(Object.values(input.beatByName))];
+  if (!beatIds.length) throw badRequest("No beat is selected. A shop is added only when its beat already exists.");
+  const beats = await prisma.beat.findMany({
+    where: { tenantId: input.tenantId, id: { in: beatIds }, active: true },
+    select: { id: true, assigneeId: true },
   });
+  if (beats.length !== beatIds.length) throw badRequest("One of the selected beats was not found.");
+  const beatById = new Map(beats.map((beat) => [beat.id, beat]));
 
+  const parsed = await markImportDuplicates(
+    input.tenantId,
+    input.rows.map(parseImportRow).filter((row) => !row.blank),
+  );
   const created: ReturnType<typeof publicLead>[] = [];
   const skipped: { row: number; name: string; phone: string; reason: string }[] = [];
+  const sequence = new Map<number, number>();
+  const keep = input.keepRows ? new Set(input.keepRows) : null;
 
-  for (const [index, raw] of input.rows.entries()) {
-    const name = cell(raw, ["name", "shop", "shopname", "business", "businessname"]);
-    const rawPhone = cell(raw, ["phone", "mobile", "mobilenumber", "contact"]);
-    const phone = parseMobile(rawPhone);
-    if (!name || !phone) {
+  for (const row of parsed) {
+    if (keep && !keep.has(row.row)) {
       skipped.push({
-        row: index + 2,
-        name,
-        phone: rawPhone,
-        reason: "Enter a 10-digit mobile number.",
+        row: row.row,
+        name: row.name,
+        phone: row.rawPhone || row.phone,
+        reason: "You removed this shop before adding.",
+      });
+      continue;
+    }
+    if (!row.ready) {
+      skipped.push({ row: row.row, name: row.name, phone: row.rawPhone || row.phone, reason: row.reason });
+      continue;
+    }
+    const beatId = input.beatByName[row.beatName];
+    const beat = beatId ? beatById.get(beatId) : undefined;
+    if (!beat) {
+      skipped.push({
+        row: row.row,
+        name: row.name,
+        phone: row.phone,
+        reason: row.beatName ? `No beat for ${row.beatName}, so this shop was not added.` : "No beat for this shop, so it was not added.",
       });
       continue;
     }
 
-    const existingLead = await prisma.lead.findFirst({ where: { tenantId: input.tenantId, phone } });
-    const existingCustomer = await prisma.customer.findFirst({ where: { tenantId: input.tenantId, phone } });
-    if (existingLead || existingCustomer) {
-      skipped.push({ row: index + 2, name, phone, reason: "Phone already exists." });
-      continue;
-    }
-
-    const assigneeHint = cell(raw, ["assignee", "assigneephone", "executive", "salesperson", "owner"]);
-    const assignee = people.find(
-      (person) =>
-        person.phone === parseMobile(assigneeHint) ||
-        person.name.toLowerCase() === assigneeHint.toLowerCase(),
-    );
-    const potentialRaw = cell(raw, ["potential", "value", "amount"]);
-    const potential = potentialRaw ? Number(String(potentialRaw).replace(/[^\d.]/g, "")) : undefined;
-    const address = cell(raw, ["address"]) || undefined;
-    const mapsLink = cell(raw, ["mapslink", "googlemapslink", "maplink", "mapsurl", "googlemaps"]) || undefined;
-    const city = cell(raw, ["city", "town"]) || undefined;
-    const place = splitPlace(address, mapsLink);
-    let latitude = parseCoord(cell(raw, ["latitude", "lat"]), -90, 90);
-    let longitude = parseCoord(cell(raw, ["longitude", "lng", "lon"]), -180, 180);
+    const place = splitPlace(row.address, row.mapsLink);
+    let latitude = row.latitude;
+    let longitude = row.longitude;
     if ((latitude == null || longitude == null) && place.mapsLink) {
       const found = await geocodeAddress(place.mapsLink);
       latitude = found?.lat ?? latitude;
       longitude = found?.lng ?? longitude;
     }
-    if ((latitude == null || longitude == null) && (place.address || city)) {
-      const found = await geocodeAddress([place.address, city].filter(Boolean).join(", "));
-      latitude = found?.lat;
-      longitude = found?.lng;
-    }
-
+    const assigneeId = beat.assigneeId;
     const lead = await prisma.lead.create({
       data: {
         tenantId: input.tenantId,
-        name,
-        phone,
-        contactPerson: cell(raw, ["contactperson", "person", "ownername"]) || undefined,
-        businessType: cell(raw, ["businesstype", "type", "category"]) || undefined,
+        name: row.name,
+        phone: row.phone,
+        contactPerson: row.contactPerson || undefined,
+        businessType: row.businessType || undefined,
         address: place.address,
         mapsLink: place.mapsLink,
-        city,
+        city: row.city || undefined,
         latitude,
         longitude,
-        notes: cell(raw, ["notes", "note", "remark"]) || undefined,
-        potential: potential && Number.isFinite(potential) ? potential : undefined,
+        notes: row.notes || undefined,
+        potential: row.potential,
         temperature: "WARM",
         source: "IMPORT",
-        status: assignee ? "ASSIGNED" : "NEW",
+        status: assigneeId ? "ASSIGNED" : "NEW",
         approvalStatus: "APPROVED",
-        assigneeId: assignee?.id ?? null,
+        assigneeId,
         createdById: input.userId,
       },
       include: leadInclude,
     });
+    if (!sequence.has(beat.id)) {
+      const last = await prisma.beatMember.findFirst({
+        where: { beatId: beat.id },
+        orderBy: { sequence: "desc" },
+      });
+      sequence.set(beat.id, last?.sequence ?? 0);
+    }
+    const next = (sequence.get(beat.id) ?? 0) + 1;
+    sequence.set(beat.id, next);
+    await prisma.beatMember.create({
+      data: { beatId: beat.id, leadId: lead.id, sequence: next },
+    });
     created.push(publicLead(lead));
-    if (assignee && assignee.id !== input.userId) {
-      notifyLeadAssigned(assignee.id, { id: lead.id, name: lead.name });
+    if (assigneeId && assigneeId !== input.userId) {
+      notifyLeadAssigned(assigneeId, { id: lead.id, name: lead.name });
     }
   }
 
   return { created: created.length, skipped: skipped.length, leads: created, errors: skipped };
+}
+
+export async function importedBeatPlaces(tenantId: number, roles: RoleCode[]) {
+  if (!isManager(roles)) throw forbidden("Only a manager can see imported shops.");
+  const members = await prisma.beatMember.findMany({
+    where: { lead: { tenantId, source: "IMPORT" } },
+    select: { beat: { select: { id: true, name: true, hq: { select: { name: true } } } } },
+  });
+  const counts = new Map<number, { beatName: string; hq: string | null; count: number }>();
+  for (const member of members) {
+    const current = counts.get(member.beat.id) ?? {
+      beatName: member.beat.name,
+      hq: member.beat.hq?.name ?? null,
+      count: 0,
+    };
+    current.count += 1;
+    counts.set(member.beat.id, current);
+  }
+  return [...counts.entries()]
+    .map(([beatId, row]) => ({ beatId, ...row }))
+    .sort((a, b) => a.beatName.localeCompare(b.beatName));
+}
+
+/** Move every Excel-imported shop from one beat to another. Hand-added shops stay put. */
+export async function moveImportedLeads(input: {
+  tenantId: number;
+  roles: RoleCode[];
+  fromBeatId: number;
+  toBeatId: number;
+}) {
+  if (!isManager(input.roles)) throw forbidden("Only a manager can move imported shops.");
+  if (input.fromBeatId === input.toBeatId) throw badRequest("Pick a different beat.");
+  const beats = await prisma.beat.findMany({
+    where: { tenantId: input.tenantId, id: { in: [input.fromBeatId, input.toBeatId] }, active: true },
+    select: { id: true, assigneeId: true, name: true },
+  });
+  const from = beats.find((beat) => beat.id === input.fromBeatId);
+  const to = beats.find((beat) => beat.id === input.toBeatId);
+  if (!from || !to) throw notFound("Beat not found.");
+
+  const members = await prisma.beatMember.findMany({
+    where: { beatId: from.id, lead: { tenantId: input.tenantId, source: "IMPORT" }, leadId: { not: null } },
+    select: { id: true, leadId: true },
+  });
+  if (!members.length) throw badRequest("That beat has no imported shops.");
+  const leadIds = members.map((member) => member.leadId).filter((id): id is number => id != null);
+  const already = await prisma.beatMember.findMany({
+    where: { beatId: to.id, leadId: { in: leadIds } },
+    select: { leadId: true },
+  });
+  const alreadyIds = new Set(already.map((row) => row.leadId));
+  const last = await prisma.beatMember.findFirst({
+    where: { beatId: to.id },
+    orderBy: { sequence: "desc" },
+    select: { sequence: true },
+  });
+  let sequence = last?.sequence ?? 0;
+  for (const member of members) {
+    if (member.leadId != null && alreadyIds.has(member.leadId)) {
+      await prisma.beatMember.delete({ where: { id: member.id } });
+      continue;
+    }
+    sequence += 1;
+    await prisma.beatMember.update({ where: { id: member.id }, data: { beatId: to.id, sequence } });
+  }
+  await prisma.lead.updateMany({
+    where: { id: { in: leadIds }, tenantId: input.tenantId },
+    data: { assigneeId: to.assigneeId },
+  });
+  return { moved: leadIds.length, from: from.name, to: to.name };
+}
+
+export async function deleteLeads(input: { tenantId: number; roles: RoleCode[]; ids: number[] }) {
+  if (!isManager(input.roles)) throw forbidden("Only a manager can delete leads.");
+  const ids = [...new Set(input.ids.filter((id) => Number.isInteger(id) && id > 0))].slice(0, 500);
+  if (!ids.length) throw badRequest("Select at least one lead.");
+  const found = await prisma.lead.findMany({
+    where: { tenantId: input.tenantId, id: { in: ids } },
+    select: { id: true },
+  });
+  const leadIds = found.map((lead) => lead.id);
+  if (!leadIds.length) throw notFound("Those leads were not found.");
+  await prisma.$transaction([
+    prisma.followUp.deleteMany({ where: { leadId: { in: leadIds } } }),
+    prisma.beatMember.deleteMany({ where: { leadId: { in: leadIds } } }),
+    prisma.sale.updateMany({ where: { leadId: { in: leadIds } }, data: { leadId: null } }),
+    prisma.visit.updateMany({ where: { leadId: { in: leadIds } }, data: { leadId: null } }),
+    prisma.beatStop.updateMany({ where: { leadId: { in: leadIds } }, data: { leadId: null } }),
+    prisma.lead.deleteMany({ where: { tenantId: input.tenantId, id: { in: leadIds } } }),
+  ]);
+  return { deleted: leadIds.length };
 }
 
 export async function updateLead(
@@ -420,8 +805,14 @@ export async function updateLead(
   }
   if (data.phone !== undefined && data.phone !== current.phone) {
     if (!isManager(roles)) throw forbidden("Only a manager can change the phone number.");
-    const taken = await prisma.lead.findFirst({ where: { tenantId, phone: data.phone, id: { not: id } } });
-    if (taken) throw conflict(`Another lead already uses this phone: ${taken.name}.`);
+    const rawPhone = data.phone.trim();
+    const phone = rawPhone ? parseMobile(rawPhone) : "";
+    if (rawPhone && !phone) throw badRequest("Enter a 10-digit mobile number, or leave it blank.");
+    data.phone = phone;
+    if (phone) {
+      const taken = await prisma.lead.findFirst({ where: { tenantId, phone, id: { not: id } } });
+      if (taken) throw conflict(`Another lead already uses this phone: ${taken.name}.`);
+    }
   }
   if ((data.latitude == null) !== (data.longitude == null)) {
     throw badRequest("Set both latitude and longitude for the shop pin.");

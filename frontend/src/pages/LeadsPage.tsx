@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ExecFilter, useExecutives, type ExecValue } from "../components/ExecFilter";
 import { MapView } from "../components/MapView";
@@ -6,6 +6,28 @@ import { api, apiForm } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { looksLikeMapsLink, mapsUrl, parseMapsLink } from "../lib/maps";
 import { mobileDigits } from "../lib/phone";
+
+type ImportPlace = {
+  beatId: number;
+  beatName: string;
+  hq: string | null;
+  count: number;
+};
+
+type ImportRow = {
+  row: number;
+  name: string;
+  phone: string;
+  rawPhone: string;
+  contactPerson: string;
+  businessType: string;
+  address: string;
+  city: string;
+  beatName: string;
+  hqName: string;
+  ready: boolean;
+  reason: string;
+};
 
 type Lead = {
   id: number;
@@ -36,6 +58,7 @@ export function LeadsPage() {
   const people = useExecutives();
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [picked, setPicked] = useState<number[]>([]);
   const [q, setQ] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -50,6 +73,13 @@ export function LeadsPage() {
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [beats, setBeats] = useState<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>([]);
   const [beatId, setBeatId] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importNote, setImportNote] = useState("");
+  const [beatChoice, setBeatChoice] = useState<Record<string, string>>({});
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
+  const [importPlaces, setImportPlaces] = useState<ImportPlace[]>([]);
+  const [moveChoice, setMoveChoice] = useState<Record<number, string>>({});
   const geoSeq = useRef(0);
   const exec = execFromQuery(searchParams.get("assigneeId"));
   const pendingOnly = searchParams.get("approval") === "pending";
@@ -74,11 +104,19 @@ export function LeadsPage() {
     load().catch(() => undefined);
   }, [accessToken, q, exec, pendingOnly]);
 
+  function loadImportPlaces() {
+    if (!accessToken) return Promise.resolve();
+    return api<ImportPlace[]>("/leads/import/places", { token: accessToken })
+      .then(setImportPlaces)
+      .catch(() => setImportPlaces([]));
+  }
+
   useEffect(() => {
     if (!accessToken) return;
     api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", { token: accessToken })
       .then(setBeats)
       .catch(() => setBeats([]));
+    loadImportPlaces();
   }, [accessToken]);
 
   function resetForm() {
@@ -183,6 +221,14 @@ export function LeadsPage() {
   async function onCreate(event: FormEvent) {
     event.preventDefault();
     if (!accessToken) return;
+    if (!name.trim()) {
+      setError("Enter the business name.");
+      return;
+    }
+    if (phone && phone.length !== 10) {
+      setError("Enter a 10-digit mobile number, or leave it blank.");
+      return;
+    }
     if (!beatId) {
       setError("Pick a beat. Each beat already belongs to an HQ.");
       return;
@@ -251,21 +297,183 @@ export function LeadsPage() {
     }
   }
 
+  const importGroups = useMemo(() => {
+    const groups = new Map<string, ImportRow[]>();
+    for (const row of importRows) {
+      const shops = groups.get(row.beatName) ?? [];
+      shops.push(row);
+      groups.set(row.beatName, shops);
+    }
+    return [...groups.entries()].map(([beatName, shops]) => ({
+      beatName,
+      shops,
+      count: shops.filter((shop) => shop.ready).length,
+    }));
+  }, [importRows]);
+
+  const shopsWithBeat = importGroups.reduce(
+    (sum, group) => sum + (Number(beatChoice[group.beatName]) ? group.count : 0),
+    0,
+  );
+  const shopsWithoutBeat = importGroups.reduce((sum, group) => sum + group.count, 0) - shopsWithBeat;
+
+  function clearImport() {
+    setImportFile(null);
+    setImportRows([]);
+    setImportNote("");
+    setBeatChoice({});
+    setOpenGroups([]);
+  }
+
+  function removeImportShop(rowNumber: number) {
+    setImportRows((current) => current.filter((row) => row.row !== rowNumber));
+  }
+
+  function beatToken(value: string) {
+    return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+
+  function matchExactBeat(beatName: string, list: { id: number; name: string }[]) {
+    const wanted = beatToken(beatName);
+    if (!wanted) return undefined;
+    return list.find((beat) => beatToken(beat.name) === wanted);
+  }
+
   async function onImport(file?: File) {
     if (!file || !accessToken) return;
     setBusy(true);
     setNotice("");
+    setError("");
     try {
       const form = new FormData();
       form.append("file", file);
+      const result = await apiForm<{ rows: ImportRow[]; ready: number; skipped: number; sheetName?: string; note?: string }>(
+        "/leads/import/preview",
+        { token: accessToken, form },
+      );
+      if (!result.rows.length) {
+        setError("That sheet has no shop rows.");
+        clearImport();
+        return;
+      }
+      const deskBeats = await api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", {
+        token: accessToken,
+      });
+      setBeats(deskBeats);
+      const choice: Record<string, string> = {};
+      for (const row of result.rows) {
+        if (!row.ready || choice[row.beatName] !== undefined) continue;
+        const found = matchExactBeat(row.beatName, deskBeats);
+        choice[row.beatName] = found ? String(found.id) : "";
+      }
+      setImportFile(file);
+      setImportRows(result.rows);
+      setImportNote(result.note ?? "");
+      setBeatChoice(choice);
+      setOpenGroups([]);
+      setNotice(
+        result.ready
+          ? `${result.ready} shops are in the sheet. A filled beat is only a suggestion because the names match. Shops left on “Choose your beat” are not added.`
+          : "Nothing in this sheet can be added. Check the reasons below.",
+      );
+    } catch (err) {
+      clearImport();
+      setError(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmImport() {
+    if (!importFile || !accessToken) return;
+    if (!importGroups.length) {
+      setError("No shops in this sheet can be added.");
+      return;
+    }
+    const beatByName: Record<string, number> = {};
+    for (const group of importGroups) {
+      const chosen = Number(beatChoice[group.beatName]);
+      if (!chosen) continue;
+      beatByName[group.beatName] = chosen;
+    }
+    if (!Object.keys(beatByName).length) {
+      setError("No beat is selected. A shop is added only when its beat already exists.");
+      return;
+    }
+    setBusy(true);
+    setNotice("");
+    setError("");
+    try {
+      const form = new FormData();
+      form.append("file", importFile);
+      form.append("beatByName", JSON.stringify(beatByName));
+      form.append(
+        "keepRows",
+        JSON.stringify(importRows.filter((row) => row.ready).map((row) => row.row)),
+      );
       const result = await apiForm<{ created: number; skipped: number }>(
         "/leads/import",
         { token: accessToken, form },
       );
-      setNotice(`Imported ${result.created}. Skipped ${result.skipped}.`);
-      await load();
+      clearImport();
+      setNotice(`Added ${result.created} lead${result.created === 1 ? "" : "s"} using your map. Skipped ${result.skipped}.`);
+      await Promise.all([load(), loadImportPlaces()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePicked() {
+    if (!accessToken || !picked.length) return;
+    const count = picked.length;
+    const ok = window.confirm(
+      count === 1
+        ? "Delete this lead? It is removed from its beat. This cannot be undone."
+        : `Delete ${count} leads? They are removed from their beats. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setNotice("");
+    setError("");
+    try {
+      const result = await api<{ deleted: number }>("/leads/delete", {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ ids: picked }),
+      });
+      setPicked([]);
+      setNotice(`Deleted ${result.deleted} lead${result.deleted === 1 ? "" : "s"}.`);
+      await Promise.all([load(), loadImportPlaces()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete those leads.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveImported(fromBeatId: number) {
+    if (!accessToken) return;
+    const toBeatId = Number(moveChoice[fromBeatId]);
+    if (!toBeatId) {
+      setError("Choose the beat these shops should move to.");
+      return;
+    }
+    setBusy(true);
+    setNotice("");
+    setError("");
+    try {
+      const result = await api<{ moved: number; to: string }>("/leads/import/move", {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ fromBeatId, toBeatId }),
+      });
+      setMoveChoice((current) => ({ ...current, [fromBeatId]: "" }));
+      setNotice(`Moved ${result.moved} shops to ${result.to}.`);
+      await Promise.all([load(), loadImportPlaces()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not move those shops.");
     } finally {
       setBusy(false);
     }
@@ -276,8 +484,7 @@ export function LeadsPage() {
       <p className="kicker">Pipeline</p>
       <h1>Leads</h1>
       <p className="muted">
-        {leads.length} lead{leads.length === 1 ? "" : "s"}. Add a shop by hand, or import a sheet. Pin the location so the
-        executive can follow the map to the visit.
+        {leads.length} lead{leads.length === 1 ? "" : "s"}. Create the beats first, then import the Excel. A shop is added only when its beat is on the desk. The rest are left out.
       </p>
       <ExecFilter people={people} value={exec} onChange={setExec} includeUnassigned />
       <div className="toolbar">
@@ -314,6 +521,171 @@ export function LeadsPage() {
       {notice ? <p className="muted">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
+      {importPlaces.length ? (
+        <section className="card form wide">
+          <h2>Move a wrong group</h2>
+          <p className="muted">
+            These shops are already on a beat. If a group landed on the wrong beat, choose the right beat and move the whole group. Shops you added by hand stay where they are.
+          </p>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Currently on</th>
+                  <th>Shops</th>
+                  <th>Move to</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {importPlaces.map((place) => (
+                  <tr key={place.beatId}>
+                    <td>
+                      {place.beatName}
+                      {place.hq ? <div className="muted">{place.hq}</div> : null}
+                    </td>
+                    <td>{place.count}</td>
+                    <td>
+                      <select
+                        value={moveChoice[place.beatId] ?? ""}
+                        onChange={(event) => setMoveChoice((current) => ({ ...current, [place.beatId]: event.target.value }))}
+                      >
+                        <option value="">Choose the right beat</option>
+                        {beats
+                          .filter((beat) => beat.id !== place.beatId)
+                          .map((beat) => (
+                            <option key={beat.id} value={beat.id}>
+                              {beat.name}
+                              {beat.territory ? ` · ${beat.territory}` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={busy || !moveChoice[place.beatId]}
+                        onClick={() => moveImported(place.beatId)}
+                      >
+                        Move
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {importRows.length ? (
+        <section className="card form wide">
+          <h2>Map the sheet to your beats</h2>
+          <p className="muted">
+            {importNote ? `${importNote} ` : ""}
+            Your beat is a beat you already created. The sheet often uses a different name, so the dropdown is how you say which desk beat these shops should join. Leave it on “Choose your beat” and those shops are not added. Open the shop count to see the shops and remove any you do not want. Nothing is saved until you click Add.{" "}
+            <Link to="/beat">Open Beat desk</Link>
+          </p>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Beat on the sheet</th>
+                  <th>Shops</th>
+                  <th>Your beat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importGroups.map((group) => {
+                  const open = openGroups.includes(group.beatName);
+                  return (
+                    <Fragment key={group.beatName || "none"}>
+                      <tr>
+                        <td>{group.beatName || "No beat name"}</td>
+                        <td>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() =>
+                              setOpenGroups((current) =>
+                                open ? current.filter((name) => name !== group.beatName) : [...current, group.beatName],
+                              )
+                            }
+                          >
+                            {open ? "Hide" : "Show"} {group.shops.length}
+                          </button>
+                        </td>
+                        <td>
+                          <select
+                            value={beatChoice[group.beatName] ?? ""}
+                            onChange={(event) => setBeatChoice((current) => ({ ...current, [group.beatName]: event.target.value }))}
+                          >
+                            <option value="">Choose your beat</option>
+                            {beats.map((beat) => (
+                              <option key={beat.id} value={beat.id}>
+                                {beat.name}
+                                {beat.territory ? ` · ${beat.territory}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr key={`${group.beatName || "none"}-shops`}>
+                          <td colSpan={3}>
+                            <div className="list">
+                              {group.shops.map((shop) => (
+                                <div key={shop.row} className="person" style={{ padding: "8px 0" }}>
+                                  <span>
+                                    <strong>{shop.name || "No name"}</strong>
+                                    <div className="muted">
+                                      {shop.phone || shop.rawPhone || "No mobile"}
+                                      {shop.city ? ` · ${shop.city}` : ""}
+                                      {shop.businessType ? ` · ${shop.businessType}` : ""}
+                                    </div>
+                                    <div className="muted">
+                                      {shop.ready
+                                        ? Number(beatChoice[group.beatName])
+                                          ? "Will be added"
+                                          : "Skipped · no beat"
+                                        : shop.reason}
+                                    </div>
+                                  </span>
+                                  <button className="btn red" type="button" onClick={() => removeImportShop(shop.row)}>
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="toolbar">
+            <button
+              className="btn green"
+              type="button"
+              disabled={busy || !shopsWithBeat}
+              onClick={() => confirmImport()}
+            >
+              {busy ? "Working…" : `Add ${shopsWithBeat} shops that have a beat`}
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={clearImport}>
+              Cancel
+            </button>
+          </div>
+          {shopsWithoutBeat ? (
+            <p className="muted">{shopsWithoutBeat} shops have no beat selected, so they will not be added.</p>
+          ) : null}
+        </section>
+      ) : null}
+
       {adding ? (
         <form className="card form wide" onSubmit={onCreate}>
           <div className="grid-2">
@@ -322,8 +694,8 @@ export function LeadsPage() {
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Shop or company" required />
             </label>
             <label>
-              Phone *
-              <input value={phone} onChange={(e) => setPhone(mobileDigits(e.target.value))} placeholder="10-digit mobile" inputMode="numeric" autoComplete="tel" required />
+              Phone
+              <input value={phone} onChange={(e) => setPhone(mobileDigits(e.target.value))} placeholder="10-digit mobile, optional" inputMode="numeric" autoComplete="tel" />
             </label>
             <label>
               Contact person
@@ -392,6 +764,20 @@ export function LeadsPage() {
         </form>
       ) : null}
 
+      <div className="toolbar">
+        <label className="check-row" style={{ margin: 0 }}>
+          <input
+            type="checkbox"
+            checked={leads.length > 0 && leads.every((lead) => picked.includes(lead.id))}
+            onChange={(event) => setPicked(event.target.checked ? leads.map((lead) => lead.id) : [])}
+            disabled={!leads.length}
+          />
+          <span>Select all</span>
+        </label>
+        <button className="btn red" type="button" disabled={busy || !picked.length} onClick={() => deletePicked()}>
+          {picked.length ? `Delete selected (${picked.length})` : "Delete selected"}
+        </button>
+      </div>
       <div className="list">
         {leads.map((lead) => {
           const place = [lead.address, lead.city].filter(Boolean).join(", ");
@@ -404,18 +790,30 @@ export function LeadsPage() {
           return (
             <article key={lead.id} className="card person">
               <div>
-                <strong>
-                  <Link to={`/leads/${lead.id}`}>{lead.name}</Link>
-                </strong>
-                <div className="muted">
-                  {beatLine}
-                </div>
-                <div className="muted">
-                  {lead.phone} · {placeLine}
-                  {place && lead.mapsLink ? " · Map link" : ""} · {lead.assigneeName || "Unassigned"}
-                  {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}
-                  {hasPin ? " · Map pin" : ""}
-                </div>
+                <label className="check-row" style={{ margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(lead.id)}
+                    onChange={(event) =>
+                      setPicked((current) =>
+                        event.target.checked ? [...current, lead.id] : current.filter((id) => id !== lead.id),
+                      )
+                    }
+                    aria-label={`Select ${lead.name}`}
+                  />
+                  <span>
+                    <strong>
+                      <Link to={`/leads/${lead.id}`}>{lead.name}</Link>
+                    </strong>
+                    <div className="muted">{beatLine}</div>
+                    <div className="muted">
+                      {lead.phone ? `${lead.phone} · ` : ""}{placeLine}
+                      {place && lead.mapsLink ? " · Map link" : ""} · {lead.assigneeName || "Unassigned"}
+                      {lead.createdByName ? ` · Added by ${lead.createdByName}` : ""}
+                      {hasPin ? " · Map pin" : ""}
+                    </div>
+                  </span>
+                </label>
               </div>
               <div className="right">
                 <span className="muted">

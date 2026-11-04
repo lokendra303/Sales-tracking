@@ -121,6 +121,16 @@ beatRouter.post(
   }),
 );
 
+beatRouter.post(
+  "/hqs/delete",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ ids: z.array(z.number().int().positive()).min(1).max(50) }).parse(req.body);
+    const data = await beat.deleteHqs(req.auth!.tenantId, req.auth!.roles, body.ids);
+    res.json({ success: true, data });
+  }),
+);
+
 beatRouter.get(
   "/beats",
   requireRole("MANAGER"),
@@ -155,6 +165,25 @@ beatRouter.post(
       ...body,
     });
     res.status(201).json({ success: true, data });
+  }),
+);
+
+beatRouter.post(
+  "/beats/delete",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) }).parse(req.body);
+    const data = await beat.deleteBeats(req.auth!.tenantId, req.auth!.roles, body.ids);
+    res.json({ success: true, data });
+  }),
+);
+
+beatRouter.delete(
+  "/beats/:id",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const data = await beat.deleteBeat(req.auth!.tenantId, req.auth!.roles, Number(req.params.id));
+    res.json({ success: true, data });
   }),
 );
 

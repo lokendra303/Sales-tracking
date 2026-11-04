@@ -1,19 +1,58 @@
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
-import * as XLSX from "xlsx";
 import { FollowUpType, LeadStatus, Temperature } from "@prisma/client";
 import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { searchPlaces } from "../../lib/geocode.js";
 import { badRequest, forbidden } from "../../lib/errors.js";
 import * as crm from "./crm.service.js";
-import { mobileSchema } from "../auth/auth.schema.js";
 
 const importUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 4 * 1024 * 1024 },
+  limits: { fileSize: 8 * 1024 * 1024 },
 });
+
+function rowsFromSheet(file: Express.Multer.File | undefined) {
+  if (!file) throw badRequest("Upload an Excel file.");
+  const sheet = crm.readLeadSheet(file.buffer);
+  if (!sheet.rows.length) throw badRequest("That sheet has no shop rows.");
+  return sheet;
+}
+
+function keepRowsFromBody(body: unknown) {
+  const raw =
+    typeof body === "object" && body && "keepRows" in body
+      ? (body as { keepRows?: unknown }).keepRows
+      : undefined;
+  if (raw == null || raw === "") return undefined;
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw badRequest("The shop list could not be read.");
+    }
+  }
+  return z.array(z.coerce.number().int().positive()).max(500).parse(parsed);
+}
+
+function beatByNameFromBody(body: unknown) {
+  const raw =
+    typeof body === "object" && body && "beatByName" in body
+      ? (body as { beatByName?: unknown }).beatByName
+      : undefined;
+  if (raw == null || raw === "") throw badRequest("Choose which beat these leads should join.");
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw badRequest("Choose which beat these leads should join.");
+    }
+  }
+  return z.record(z.string(), z.coerce.number().int().positive()).parse(parsed);
+}
 
 export const crmRouter = Router();
 crmRouter.use(requireAuth);
@@ -38,9 +77,16 @@ crmRouter.use((req, _res, next) => {
   next();
 });
 
+const optionalLeadPhone = z
+  .string()
+  .trim()
+  .max(20)
+  .optional()
+  .transform((value) => value ?? "");
+
 const createLeadSchema = z.object({
   name: z.string().min(2, "Enter the business name."),
-  phone: mobileSchema,
+  phone: optionalLeadPhone,
   contactPerson: z.string().optional(),
   businessType: z.string().optional(),
   productInterest: z.string().max(200).optional(),
@@ -113,23 +159,78 @@ crmRouter.post(
 );
 
 crmRouter.post(
+  "/leads/import/preview",
+  requireRole("MANAGER"),
+  importUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    const sheet = rowsFromSheet(req.file);
+    const data = await crm.previewLeadImport({
+      tenantId: req.auth!.tenantId,
+      userId: req.auth!.userId,
+      roles: req.auth!.roles,
+      rows: sheet.rows,
+    });
+    res.json({ success: true, data: { ...data, sheetName: sheet.sheetName, note: sheet.note } });
+  }),
+);
+
+crmRouter.post(
   "/leads/import",
   requireRole("MANAGER"),
   importUpload.single("file"),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw badRequest("Upload an Excel file.");
-    const book = XLSX.read(req.file.buffer, { type: "buffer" });
-    const sheet = book.Sheets[book.SheetNames[0]];
-    if (!sheet) throw badRequest("The Excel file has no sheet.");
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
-    if (!rows.length) throw badRequest("The first sheet is empty.");
+    const sheet = rowsFromSheet(req.file);
     const data = await crm.importLeads({
       tenantId: req.auth!.tenantId,
       userId: req.auth!.userId,
       roles: req.auth!.roles,
-      rows: rows.slice(0, 500),
+      rows: sheet.rows,
+      beatByName: beatByNameFromBody(req.body),
+      keepRows: keepRowsFromBody(req.body),
     });
     res.status(201).json({ success: true, data });
+  }),
+);
+
+crmRouter.get(
+  "/leads/import/places",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const data = await crm.importedBeatPlaces(req.auth!.tenantId, req.auth!.roles);
+    res.json({ success: true, data });
+  }),
+);
+
+crmRouter.post(
+  "/leads/import/move",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        fromBeatId: z.number().int().positive(),
+        toBeatId: z.number().int().positive(),
+      })
+      .parse(req.body);
+    const data = await crm.moveImportedLeads({
+      tenantId: req.auth!.tenantId,
+      roles: req.auth!.roles,
+      ...body,
+    });
+    res.json({ success: true, data });
+  }),
+);
+
+crmRouter.post(
+  "/leads/delete",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) }).parse(req.body);
+    const data = await crm.deleteLeads({
+      tenantId: req.auth!.tenantId,
+      roles: req.auth!.roles,
+      ids: body.ids,
+    });
+    res.json({ success: true, data });
   }),
 );
 
@@ -147,7 +248,7 @@ crmRouter.put(
     const body = z
       .object({
         name: z.string().trim().min(2, "Enter the business name.").optional(),
-        phone: mobileSchema.optional(),
+        phone: z.string().trim().max(20).optional(),
         contactPerson: z.string().optional(),
         businessType: z.string().optional(),
         productInterest: z.string().max(200).nullable().optional(),

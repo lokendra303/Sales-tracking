@@ -132,8 +132,8 @@ export function LeadDetailPage() {
   async function saveDetails(event: FormEvent) {
     event.preventDefault();
     if (!accessToken || !lead) return;
-    if (form.phone.length !== 10) {
-      setError("Enter a 10-digit mobile number.");
+    if (form.phone && form.phone.length !== 10) {
+      setError("Enter a 10-digit mobile number, or leave it blank.");
       return;
     }
     setSaving(true);
@@ -364,14 +364,13 @@ export function LeadDetailPage() {
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </label>
             <label>
-              Phone *
+              Phone
               <input
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: mobileDigits(e.target.value) })}
                 inputMode="numeric"
                 autoComplete="tel"
-                placeholder="10-digit mobile"
-                required
+                placeholder="10-digit mobile, optional"
               />
             </label>
             <label>

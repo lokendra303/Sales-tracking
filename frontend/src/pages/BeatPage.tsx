@@ -149,6 +149,8 @@ export function BeatPage() {
   const [planDates, setPlanDates] = useState<string[]>([]);
   const [calMonth, setCalMonth] = useState(() => new Date());
   const [hqFilter, setHqFilter] = useState<"all" | "none" | string>("all");
+  const [pickedBeats, setPickedBeats] = useState<number[]>([]);
+  const [pickedHqs, setPickedHqs] = useState<number[]>([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -338,6 +340,83 @@ export function BeatPage() {
       setSelectedBeatId(data.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create beat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePickedHqs() {
+    if (!accessToken || !pickedHqs.length) return;
+    const count = pickedHqs.length;
+    const ok = window.confirm(
+      count === 1
+        ? "Delete this headquarters? The beats stay. They just lose this HQ."
+        : `Delete ${count} headquarters? The beats stay. They just lose these HQs.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ deleted: number }>("/hqs/delete", {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ ids: pickedHqs }),
+      });
+      if (hqFilter !== "all" && hqFilter !== "none" && pickedHqs.includes(Number(hqFilter))) setHqFilter("all");
+      if (pickedHqs.includes(Number(hqChoice))) setHqChoice("");
+      setPickedHqs([]);
+      setNotice(`Deleted ${result.deleted} headquarters. The beats are still here.`);
+      await Promise.all([loadBeats(), loadHqs()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete those headquarters.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePickedBeats() {
+    if (!accessToken || !pickedBeats.length) return;
+    const count = pickedBeats.length;
+    const ok = window.confirm(
+      count === 1
+        ? "Delete this beat? The shops stay in Leads. They are only taken off the beat."
+        : `Delete ${count} beats? The shops stay in Leads. They are only taken off these beats.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ deleted: number }>("/beats/delete", {
+        method: "POST",
+        token: accessToken,
+        body: JSON.stringify({ ids: pickedBeats }),
+      });
+      if (selectedBeatId && pickedBeats.includes(selectedBeatId)) setSelectedBeatId(null);
+      setPickedBeats([]);
+      setNotice(`Deleted ${result.deleted} beat${result.deleted === 1 ? "" : "s"}. The shops are still in Leads.`);
+      await Promise.all([loadBeats(), loadHqs()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete those beats.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeBeat() {
+    if (!accessToken || !selected) return;
+    const ok = window.confirm(
+      `Delete the beat “${selected.name}”? The shops stay in Leads. They are only taken off this beat.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/beats/${selected.id}`, { method: "DELETE", token: accessToken });
+      setNotice(`Deleted “${selected.name}”. The shops are still in Leads.`);
+      setSelectedBeatId(null);
+      await Promise.all([loadBeats(), loadHqs()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete that beat.");
     } finally {
       setBusy(false);
     }
@@ -565,7 +644,47 @@ export function BeatPage() {
           ))}
         </select>
       </div>
-      {!hqs.length ? <p className="muted">No HQ yet. Add one above, then create beats under it.</p> : null}
+      {!hqs.length ? <p className="muted">No HQ yet. Add one above, then create beats under it.</p> : (
+        <>
+          <div className="toolbar">
+            <label className="check-row" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={hqs.length > 0 && hqs.every((hq) => pickedHqs.includes(hq.id))}
+                onChange={(event) => setPickedHqs(event.target.checked ? hqs.map((hq) => hq.id) : [])}
+              />
+              <span>Select all</span>
+            </label>
+            <button className="btn red" type="button" disabled={busy || !pickedHqs.length} onClick={() => deletePickedHqs()}>
+              {pickedHqs.length ? `Delete selected (${pickedHqs.length})` : "Delete selected"}
+            </button>
+          </div>
+          <div className="list">
+            {hqs.map((hq) => (
+              <div key={hq.id} className="card person">
+                <label className="check-row" style={{ margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={pickedHqs.includes(hq.id)}
+                    onChange={(event) =>
+                      setPickedHqs((current) =>
+                        event.target.checked ? [...current, hq.id] : current.filter((id) => id !== hq.id),
+                      )
+                    }
+                    aria-label={`Select ${hq.name}`}
+                  />
+                  <span>
+                    <strong>{hq.name}</strong>
+                    <div className="muted">
+                      {hq.beatCount} beat{hq.beatCount === 1 ? "" : "s"}
+                    </div>
+                  </span>
+                </label>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       {notice ? <p className="on">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
@@ -607,28 +726,51 @@ export function BeatPage() {
                 <span className="muted"> · {hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name}</span>
               ) : null}
             </h2>
+            <div className="toolbar">
+              <label className="check-row" style={{ margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={listedBeats.length > 0 && listedBeats.every((beat) => pickedBeats.includes(beat.id))}
+                  onChange={(event) => setPickedBeats(event.target.checked ? listedBeats.map((beat) => beat.id) : [])}
+                  disabled={!listedBeats.length}
+                />
+                <span>Select all</span>
+              </label>
+              <button className="btn red" type="button" disabled={busy || !pickedBeats.length} onClick={() => deletePickedBeats()}>
+                {pickedBeats.length ? `Delete selected (${pickedBeats.length})` : "Delete selected"}
+              </button>
+            </div>
             <div className="list">
               {listedBeats.map((b) => (
-                  <button
+                  <div
                     key={b.id}
-                    type="button"
                     className={`card person pick ${selectedBeatId === b.id ? "picked" : ""}`}
                     onClick={() => setSelectedBeatId(b.id)}
                   >
-                    <div>
-                      <strong>
-                        {b.name}
-                      </strong>
-                      <div className="muted">
-                        {b.assigneeName ?? "No salesperson"} · {b.territory || "No HQ"} · {b.size} stops
-                      </div>
-                      <div className="muted">
-                        {b.planDates?.length
-                          ? `Dates: ${b.planDates.slice(0, 4).map((iso) => formatPlanDate(iso)).join(", ")}${b.planDates.length > 4 ? ` +${b.planDates.length - 4} more` : ""}`
-                          : "No calendar dates"}
-                      </div>
-                    </div>
-                  </button>
+                    <label className="check-row" style={{ margin: 0 }} onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={pickedBeats.includes(b.id)}
+                        onChange={(event) =>
+                          setPickedBeats((current) =>
+                            event.target.checked ? [...current, b.id] : current.filter((id) => id !== b.id),
+                          )
+                        }
+                        aria-label={`Select ${b.name}`}
+                      />
+                      <span>
+                        <strong>{b.name}</strong>
+                        <div className="muted">
+                          {b.assigneeName ?? "No salesperson"} · {b.territory || "No HQ"} · {b.size} stops
+                        </div>
+                        <div className="muted">
+                          {b.planDates?.length
+                            ? `Dates: ${b.planDates.slice(0, 4).map((iso) => formatPlanDate(iso)).join(", ")}${b.planDates.length > 4 ? ` +${b.planDates.length - 4} more` : ""}`
+                            : "No calendar dates"}
+                        </div>
+                      </span>
+                    </label>
+                  </div>
                 ))}
               {!listedBeats.length ? (
                 <p className="muted">
@@ -675,6 +817,9 @@ export function BeatPage() {
                   <h2 style={{ margin: 0, flex: 1 }}>
                     {selected.name} · {selected.size} stops · {selected.territory || "No HQ"}
                   </h2>
+                  <button className="btn red" type="button" disabled={busy} onClick={() => removeBeat()}>
+                    Delete beat
+                  </button>
                 </div>
                 <div className="toolbar">
                   <label className="muted">
