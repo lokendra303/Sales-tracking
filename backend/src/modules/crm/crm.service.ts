@@ -676,6 +676,23 @@ export async function importLeads(input: {
     for (const [name, id] of Object.entries(beatByName)) beatIdBySheetName.set(name, id);
   }
 
+  const memberRows = beatById.size
+    ? await prisma.beatMember.findMany({
+        where: { beatId: { in: [...beatById.keys()] }, leadId: { not: null } },
+        select: { beatId: true, lead: { select: { name: true, phone: true } } },
+      })
+    : [];
+  const placed = new Map<number, { phones: Set<string>; names: Set<string> }>();
+  for (const member of memberRows) {
+    const bucket = placed.get(member.beatId) ?? { phones: new Set<string>(), names: new Set<string>() };
+    const phone = (member.lead?.phone ?? "").trim();
+    const name = (member.lead?.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (phone) bucket.phones.add(phone);
+    if (name) bucket.names.add(name);
+    placed.set(member.beatId, bucket);
+  }
+  let already = 0;
+
   for (const row of parsed) {
     if (keep && !keep.has(row.row)) {
       skipped.push({
@@ -702,6 +719,14 @@ export async function importLeads(input: {
       continue;
     }
 
+    const bucket = placed.get(beat.id) ?? { phones: new Set<string>(), names: new Set<string>() };
+    placed.set(beat.id, bucket);
+    const nameKey = row.name.trim().toLowerCase().replace(/\s+/g, " ");
+    if ((row.phone && bucket.phones.has(row.phone)) || (nameKey && bucket.names.has(nameKey))) {
+      already += 1;
+      continue;
+    }
+
     const place = splitPlace(row.address, row.mapsLink);
     let latitude = row.latitude;
     let longitude = row.longitude;
@@ -714,27 +739,25 @@ export async function importLeads(input: {
     if (row.phone) {
       const existing = await prisma.lead.findFirst({
         where: { tenantId: input.tenantId, phone: row.phone },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       if (existing) {
-        const already = await prisma.beatMember.findFirst({
-          where: { beatId: beat.id, leadId: existing.id },
-          select: { id: true },
-        });
-        if (!already) {
-          if (!sequence.has(beat.id)) {
-            const last = await prisma.beatMember.findFirst({
-              where: { beatId: beat.id },
-              orderBy: { sequence: "desc" },
-            });
-            sequence.set(beat.id, last?.sequence ?? 0);
-          }
-          const next = (sequence.get(beat.id) ?? 0) + 1;
-          sequence.set(beat.id, next);
-          await prisma.beatMember.create({
-            data: { beatId: beat.id, leadId: existing.id, sequence: next },
+        if (!sequence.has(beat.id)) {
+          const last = await prisma.beatMember.findFirst({
+            where: { beatId: beat.id },
+            orderBy: { sequence: "desc" },
           });
+          sequence.set(beat.id, last?.sequence ?? 0);
         }
+        const next = (sequence.get(beat.id) ?? 0) + 1;
+        sequence.set(beat.id, next);
+        await prisma.beatMember.create({
+          data: { beatId: beat.id, leadId: existing.id, sequence: next },
+        });
+        bucket.phones.add(row.phone);
+        const existingName = existing.name.trim().toLowerCase().replace(/\s+/g, " ");
+        if (existingName) bucket.names.add(existingName);
+        if (nameKey) bucket.names.add(nameKey);
         created.push(publicLead(await prisma.lead.findFirstOrThrow({ where: { id: existing.id }, include: leadInclude })));
         continue;
       }
@@ -775,12 +798,22 @@ export async function importLeads(input: {
       data: { beatId: beat.id, leadId: lead.id, sequence: next },
     });
     created.push(publicLead(lead));
+    if (row.phone) bucket.phones.add(row.phone);
+    if (nameKey) bucket.names.add(nameKey);
     if (assigneeId && assigneeId !== input.userId) {
       notifyLeadAssigned(assigneeId, { id: lead.id, name: lead.name });
     }
   }
 
-  return { created: created.length, skipped: skipped.length, beatsCreated, leads: created, errors: skipped };
+  return {
+    created: created.length,
+    skipped: skipped.length,
+    beatsCreated,
+    already,
+    same: created.length === 0 && beatsCreated === 0 && already > 0,
+    leads: created,
+    errors: skipped,
+  };
 }
 
 export async function importedBeatPlaces(tenantId: number, roles: RoleCode[]) {

@@ -81,6 +81,7 @@ export function LeadsPage() {
   const [openGroups, setOpenGroups] = useState<string[]>([]);
   const [importPlaces, setImportPlaces] = useState<ImportPlace[]>([]);
   const [moveChoice, setMoveChoice] = useState<Record<number, string>>({});
+  const [moveOpen, setMoveOpen] = useState(false);
   const geoSeq = useRef(0);
   const addFormRef = useRef<HTMLFormElement>(null);
   const exec = execFromQuery(searchParams.get("assigneeId"));
@@ -400,15 +401,22 @@ export function LeadsPage() {
         "keepRows",
         JSON.stringify(importRows.filter((row) => row.ready && row.beatName.trim()).map((row) => row.row)),
       );
-      const result = await apiForm<{ created: number; skipped: number; beatsCreated: number }>(
+      const result = await apiForm<{ created: number; skipped: number; beatsCreated: number; already: number; same: boolean }>(
         "/leads/import",
         { token: accessToken, form },
       );
       const hqName = hqs.find((hq) => hq.id === hqId)?.name ?? "that headquarters";
       clearImport();
-      setNotice(
-        `Created ${result.beatsCreated} beat${result.beatsCreated === 1 ? "" : "s"} under ${hqName} and added ${result.created} shop${result.created === 1 ? "" : "s"}. Skipped ${result.skipped}.`,
-      );
+      if (result.same) {
+        setNotice("This is the same sheet. These beats already have these shops.");
+      } else {
+        const alreadyNote = result.already
+          ? ` ${result.already} shop${result.already === 1 ? " was" : "s were"} already on these beats.`
+          : "";
+        setNotice(
+          `Created ${result.beatsCreated} beat${result.beatsCreated === 1 ? "" : "s"} under ${hqName} and added ${result.created} shop${result.created === 1 ? "" : "s"}.${alreadyNote} Skipped ${result.skipped}.`,
+        );
+      }
       const deskBeats = await api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", {
         token: accessToken,
       });
@@ -595,12 +603,21 @@ export function LeadsPage() {
         </form>
       ) : null}
 
-      {importPlaces.length ? (
+      {importPlaces.length && !importRows.length ? (
         <section className="card form wide">
-          <h2>Move a wrong group</h2>
+          <div className="toolbar">
+            <h2 style={{ margin: 0 }}>Move a wrong group</h2>
+            <button className="btn" type="button" onClick={() => setMoveOpen((open) => !open)}>
+              {moveOpen ? "Close" : "Open"}
+            </button>
+          </div>
           <p className="muted">
-            These shops are already on a beat. If a group landed on the wrong beat, choose the right beat and move the whole group. Shops you added by hand stay where they are.
+            {importPlaces.length} group{importPlaces.length === 1 ? "" : "s"} already on beats.
+            {moveOpen
+              ? " If a group landed on the wrong beat, choose the right beat and move the whole group. Shops you added by hand stay where they are."
+              : " Open this if a group landed on the wrong beat."}
           </p>
+          {moveOpen ? (
           <div className="table-scroll">
             <table className="table">
               <thead>
@@ -650,6 +667,7 @@ export function LeadsPage() {
               </tbody>
             </table>
           </div>
+          ) : null}
         </section>
       ) : null}
 
