@@ -184,17 +184,35 @@ a:hover { color: var(--teal-2); }
 .check-row {
   display: flex !important;
   flex-direction: row !important;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-start;
   gap: 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
+  white-space: nowrap;
 }
-.check-row input { width: auto; margin-top: 3px; flex: none; }
+.check-row input,
+input[type="checkbox"] {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  flex: none;
+  accent-color: var(--teal);
+}
 .card.check-row { padding: 10px 14px; color: var(--text); font-size: inherit; font-weight: 400; }
 .toolbar input,
 .toolbar select { width: auto; flex: 1 1 180px; min-width: 160px; }
+.toolbar input[type="checkbox"] {
+  flex: none;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+}
+.toolbar > .check-row { flex: 0 0 auto; margin: 0; }
 .toolbar .btn { flex: none; }
 .cal { width: min(420px, 100%); display: grid; gap: 8px; margin: 8px 0 16px; }
 .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

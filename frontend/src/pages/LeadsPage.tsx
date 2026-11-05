@@ -72,15 +72,17 @@ export function LeadsPage() {
   const [city, setCity] = useState("");
   const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
   const [beats, setBeats] = useState<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>([]);
+  const [hqs, setHqs] = useState<{ id: number; name: string; beatCount: number }[]>([]);
+  const [importHq, setImportHq] = useState("");
   const [beatId, setBeatId] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
   const [importNote, setImportNote] = useState("");
-  const [beatChoice, setBeatChoice] = useState<Record<string, string>>({});
   const [openGroups, setOpenGroups] = useState<string[]>([]);
   const [importPlaces, setImportPlaces] = useState<ImportPlace[]>([]);
   const [moveChoice, setMoveChoice] = useState<Record<number, string>>({});
   const geoSeq = useRef(0);
+  const addFormRef = useRef<HTMLFormElement>(null);
   const exec = execFromQuery(searchParams.get("assigneeId"));
   const pendingOnly = searchParams.get("approval") === "pending";
 
@@ -116,8 +118,15 @@ export function LeadsPage() {
     api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", { token: accessToken })
       .then(setBeats)
       .catch(() => setBeats([]));
+    api<{ id: number; name: string; beatCount: number }[]>("/hqs", { token: accessToken })
+      .then(setHqs)
+      .catch(() => setHqs([]));
     loadImportPlaces();
   }, [accessToken]);
+
+  useEffect(() => {
+    if (adding) addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [adding]);
 
   function resetForm() {
     setName("");
@@ -311,32 +320,19 @@ export function LeadsPage() {
     }));
   }, [importRows]);
 
-  const shopsWithBeat = importGroups.reduce(
-    (sum, group) => sum + (Number(beatChoice[group.beatName]) ? group.count : 0),
-    0,
-  );
-  const shopsWithoutBeat = importGroups.reduce((sum, group) => sum + group.count, 0) - shopsWithBeat;
+  const shopsToAdd = importGroups.reduce((sum, group) => sum + (group.beatName.trim() ? group.count : 0), 0);
+  const shopsWithoutBeat = importGroups.reduce((sum, group) => sum + (group.beatName.trim() ? 0 : group.count), 0);
 
   function clearImport() {
     setImportFile(null);
     setImportRows([]);
     setImportNote("");
-    setBeatChoice({});
+    setImportHq("");
     setOpenGroups([]);
   }
 
   function removeImportShop(rowNumber: number) {
     setImportRows((current) => current.filter((row) => row.row !== rowNumber));
-  }
-
-  function beatToken(value: string) {
-    return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
-  }
-
-  function matchExactBeat(beatName: string, list: { id: number; name: string }[]) {
-    const wanted = beatToken(beatName);
-    if (!wanted) return undefined;
-    return list.find((beat) => beatToken(beat.name) === wanted);
   }
 
   async function onImport(file?: File) {
@@ -356,25 +352,23 @@ export function LeadsPage() {
         clearImport();
         return;
       }
-      const deskBeats = await api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", {
-        token: accessToken,
-      });
+      const [deskBeats, deskHqs] = await Promise.all([
+        api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", { token: accessToken }),
+        api<{ id: number; name: string; beatCount: number }[]>("/hqs", { token: accessToken }),
+      ]);
       setBeats(deskBeats);
-      const choice: Record<string, string> = {};
-      for (const row of result.rows) {
-        if (!row.ready || choice[row.beatName] !== undefined) continue;
-        const found = matchExactBeat(row.beatName, deskBeats);
-        choice[row.beatName] = found ? String(found.id) : "";
-      }
+      setHqs(deskHqs);
+      const sheetHq = result.rows.find((row) => row.hqName.trim())?.hqName.trim().toLowerCase();
+      const matchedHq = sheetHq ? deskHqs.find((hq) => hq.name.trim().toLowerCase() === sheetHq) : undefined;
       setImportFile(file);
       setImportRows(result.rows);
       setImportNote(result.note ?? "");
-      setBeatChoice(choice);
+      setImportHq(matchedHq ? String(matchedHq.id) : "");
       setOpenGroups([]);
       setNotice(
         result.ready
-          ? `${result.ready} shops are in the sheet. A filled beat is only a suggestion because the names match. Shops left on “Choose your beat” are not added.`
-          : "Nothing in this sheet can be added. Check the reasons below.",
+          ? `${result.ready} shops are in the sheet. Choose the headquarters and the beats will be created there.`
+          : "Nothing in this sheet can be added. Open a beat and check the shop reasons.",
       );
     } catch (err) {
       clearImport();
@@ -386,18 +380,13 @@ export function LeadsPage() {
 
   async function confirmImport() {
     if (!importFile || !accessToken) return;
-    if (!importGroups.length) {
-      setError("No shops in this sheet can be added.");
+    const hqId = Number(importHq);
+    if (!hqId) {
+      setError("Choose the headquarters these beats should join.");
       return;
     }
-    const beatByName: Record<string, number> = {};
-    for (const group of importGroups) {
-      const chosen = Number(beatChoice[group.beatName]);
-      if (!chosen) continue;
-      beatByName[group.beatName] = chosen;
-    }
-    if (!Object.keys(beatByName).length) {
-      setError("No beat is selected. A shop is added only when its beat already exists.");
+    if (!shopsToAdd) {
+      setError("No shops in this sheet can be added.");
       return;
     }
     setBusy(true);
@@ -406,17 +395,24 @@ export function LeadsPage() {
     try {
       const form = new FormData();
       form.append("file", importFile);
-      form.append("beatByName", JSON.stringify(beatByName));
+      form.append("hqId", String(hqId));
       form.append(
         "keepRows",
-        JSON.stringify(importRows.filter((row) => row.ready).map((row) => row.row)),
+        JSON.stringify(importRows.filter((row) => row.ready && row.beatName.trim()).map((row) => row.row)),
       );
-      const result = await apiForm<{ created: number; skipped: number }>(
+      const result = await apiForm<{ created: number; skipped: number; beatsCreated: number }>(
         "/leads/import",
         { token: accessToken, form },
       );
+      const hqName = hqs.find((hq) => hq.id === hqId)?.name ?? "that headquarters";
       clearImport();
-      setNotice(`Added ${result.created} lead${result.created === 1 ? "" : "s"} using your map. Skipped ${result.skipped}.`);
+      setNotice(
+        `Created ${result.beatsCreated} beat${result.beatsCreated === 1 ? "" : "s"} under ${hqName} and added ${result.created} shop${result.created === 1 ? "" : "s"}. Skipped ${result.skipped}.`,
+      );
+      const deskBeats = await api<{ id: number; name: string; territory?: string | null; assigneeName: string | null }[]>("/beats", {
+        token: accessToken,
+      });
+      setBeats(deskBeats);
       await Promise.all([load(), loadImportPlaces()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");
@@ -484,7 +480,7 @@ export function LeadsPage() {
       <p className="kicker">Pipeline</p>
       <h1>Leads</h1>
       <p className="muted">
-        {leads.length} lead{leads.length === 1 ? "" : "s"}. Create the beats first, then import the Excel. A shop is added only when its beat is on the desk. The rest are left out.
+        {leads.length} lead{leads.length === 1 ? "" : "s"}. Import the Excel, choose the headquarters, and the beats are created there with their shops.
       </p>
       <ExecFilter people={people} value={exec} onChange={setExec} includeUnassigned />
       <div className="toolbar">
@@ -521,173 +517,8 @@ export function LeadsPage() {
       {notice ? <p className="muted">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      {importPlaces.length ? (
-        <section className="card form wide">
-          <h2>Move a wrong group</h2>
-          <p className="muted">
-            These shops are already on a beat. If a group landed on the wrong beat, choose the right beat and move the whole group. Shops you added by hand stay where they are.
-          </p>
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Currently on</th>
-                  <th>Shops</th>
-                  <th>Move to</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {importPlaces.map((place) => (
-                  <tr key={place.beatId}>
-                    <td>
-                      {place.beatName}
-                      {place.hq ? <div className="muted">{place.hq}</div> : null}
-                    </td>
-                    <td>{place.count}</td>
-                    <td>
-                      <select
-                        value={moveChoice[place.beatId] ?? ""}
-                        onChange={(event) => setMoveChoice((current) => ({ ...current, [place.beatId]: event.target.value }))}
-                      >
-                        <option value="">Choose the right beat</option>
-                        {beats
-                          .filter((beat) => beat.id !== place.beatId)
-                          .map((beat) => (
-                            <option key={beat.id} value={beat.id}>
-                              {beat.name}
-                              {beat.territory ? ` · ${beat.territory}` : ""}
-                            </option>
-                          ))}
-                      </select>
-                    </td>
-                    <td>
-                      <button
-                        className="btn"
-                        type="button"
-                        disabled={busy || !moveChoice[place.beatId]}
-                        onClick={() => moveImported(place.beatId)}
-                      >
-                        Move
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
-
-      {importRows.length ? (
-        <section className="card form wide">
-          <h2>Map the sheet to your beats</h2>
-          <p className="muted">
-            {importNote ? `${importNote} ` : ""}
-            Your beat is a beat you already created. The sheet often uses a different name, so the dropdown is how you say which desk beat these shops should join. Leave it on “Choose your beat” and those shops are not added. Open the shop count to see the shops and remove any you do not want. Nothing is saved until you click Add.{" "}
-            <Link to="/beat">Open Beat desk</Link>
-          </p>
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Beat on the sheet</th>
-                  <th>Shops</th>
-                  <th>Your beat</th>
-                </tr>
-              </thead>
-              <tbody>
-                {importGroups.map((group) => {
-                  const open = openGroups.includes(group.beatName);
-                  return (
-                    <Fragment key={group.beatName || "none"}>
-                      <tr>
-                        <td>{group.beatName || "No beat name"}</td>
-                        <td>
-                          <button
-                            className="btn"
-                            type="button"
-                            onClick={() =>
-                              setOpenGroups((current) =>
-                                open ? current.filter((name) => name !== group.beatName) : [...current, group.beatName],
-                              )
-                            }
-                          >
-                            {open ? "Hide" : "Show"} {group.shops.length}
-                          </button>
-                        </td>
-                        <td>
-                          <select
-                            value={beatChoice[group.beatName] ?? ""}
-                            onChange={(event) => setBeatChoice((current) => ({ ...current, [group.beatName]: event.target.value }))}
-                          >
-                            <option value="">Choose your beat</option>
-                            {beats.map((beat) => (
-                              <option key={beat.id} value={beat.id}>
-                                {beat.name}
-                                {beat.territory ? ` · ${beat.territory}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                      {open ? (
-                        <tr key={`${group.beatName || "none"}-shops`}>
-                          <td colSpan={3}>
-                            <div className="list">
-                              {group.shops.map((shop) => (
-                                <div key={shop.row} className="person" style={{ padding: "8px 0" }}>
-                                  <span>
-                                    <strong>{shop.name || "No name"}</strong>
-                                    <div className="muted">
-                                      {shop.phone || shop.rawPhone || "No mobile"}
-                                      {shop.city ? ` · ${shop.city}` : ""}
-                                      {shop.businessType ? ` · ${shop.businessType}` : ""}
-                                    </div>
-                                    <div className="muted">
-                                      {shop.ready
-                                        ? Number(beatChoice[group.beatName])
-                                          ? "Will be added"
-                                          : "Skipped · no beat"
-                                        : shop.reason}
-                                    </div>
-                                  </span>
-                                  <button className="btn red" type="button" onClick={() => removeImportShop(shop.row)}>
-                                    Remove
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="toolbar">
-            <button
-              className="btn green"
-              type="button"
-              disabled={busy || !shopsWithBeat}
-              onClick={() => confirmImport()}
-            >
-              {busy ? "Working…" : `Add ${shopsWithBeat} shops that have a beat`}
-            </button>
-            <button className="btn" type="button" disabled={busy} onClick={clearImport}>
-              Cancel
-            </button>
-          </div>
-          {shopsWithoutBeat ? (
-            <p className="muted">{shopsWithoutBeat} shops have no beat selected, so they will not be added.</p>
-          ) : null}
-        </section>
-      ) : null}
-
       {adding ? (
-        <form className="card form wide" onSubmit={onCreate}>
+        <form className="card form wide" ref={addFormRef} onSubmit={onCreate}>
           <div className="grid-2">
             <label>
               Business name *
@@ -762,6 +593,168 @@ export function LeadsPage() {
             {busy ? "Saving…" : "Save lead"}
           </button>
         </form>
+      ) : null}
+
+      {importPlaces.length ? (
+        <section className="card form wide">
+          <h2>Move a wrong group</h2>
+          <p className="muted">
+            These shops are already on a beat. If a group landed on the wrong beat, choose the right beat and move the whole group. Shops you added by hand stay where they are.
+          </p>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Currently on</th>
+                  <th>Shops</th>
+                  <th>Move to</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {importPlaces.map((place) => (
+                  <tr key={place.beatId}>
+                    <td>
+                      {place.beatName}
+                      {place.hq ? <div className="muted">{place.hq}</div> : null}
+                    </td>
+                    <td>{place.count}</td>
+                    <td>
+                      <select
+                        value={moveChoice[place.beatId] ?? ""}
+                        onChange={(event) => setMoveChoice((current) => ({ ...current, [place.beatId]: event.target.value }))}
+                      >
+                        <option value="">Choose the right beat</option>
+                        {beats
+                          .filter((beat) => beat.id !== place.beatId)
+                          .map((beat) => (
+                            <option key={beat.id} value={beat.id}>
+                              {beat.name}
+                              {beat.territory ? ` · ${beat.territory}` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={busy || !moveChoice[place.beatId]}
+                        onClick={() => moveImported(place.beatId)}
+                      >
+                        Move
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {importRows.length ? (
+        <section className="card form wide">
+          <div className="toolbar">
+            <h2 style={{ margin: 0 }}>Shops from the sheet</h2>
+            <button className="btn" type="button" disabled={busy} onClick={clearImport}>
+              Close
+            </button>
+          </div>
+          <p className="muted">
+            {importNote ? `${importNote} ` : ""}
+            Choose one headquarters. Each beat name on the sheet becomes a beat under it, and the shops go on that beat. A shop is still added when its mobile is missing or not 10 digits. Open the shop count to see the shops and remove any you do not want. Nothing is saved until you click Create.
+          </p>
+          <label>
+            Headquarters
+            <select value={importHq} onChange={(event) => setImportHq(event.target.value)}>
+              <option value="">Choose the headquarters</option>
+              {hqs.map((hq) => (
+                <option key={hq.id} value={hq.id}>
+                  {hq.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Beat on the sheet</th>
+                  <th>Shops</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importGroups.map((group) => {
+                  const open = openGroups.includes(group.beatName);
+                  return (
+                    <Fragment key={group.beatName || "none"}>
+                      <tr>
+                        <td>{group.beatName || "No beat name"}</td>
+                        <td>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() =>
+                              setOpenGroups((current) =>
+                                open ? current.filter((name) => name !== group.beatName) : [...current, group.beatName],
+                              )
+                            }
+                          >
+                            {open ? "Hide" : "Show"} {group.count}
+                          </button>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr>
+                          <td colSpan={2}>
+                            <div className="list">
+                              {group.shops.map((shop) => (
+                                <div key={shop.row} className="person" style={{ padding: "8px 0" }}>
+                                  <span>
+                                    <strong>{shop.name || "No name"}</strong>
+                                    <div className="muted">
+                                      {shop.phone || shop.rawPhone || "No mobile"}
+                                      {shop.city ? ` · ${shop.city}` : ""}
+                                      {shop.businessType ? ` · ${shop.businessType}` : ""}
+                                    </div>
+                                    <div className="muted">
+                                      {shop.ready
+                                        ? group.beatName.trim()
+                                          ? importHq
+                                            ? "Will be added"
+                                            : "Choose a headquarters"
+                                          : "Skipped · no beat name"
+                                        : shop.reason}
+                                    </div>
+                                  </span>
+                                  <button className="btn red" type="button" onClick={() => removeImportShop(shop.row)}>
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="toolbar">
+            <button className="btn green" type="button" disabled={busy || !importHq || !shopsToAdd} onClick={() => confirmImport()}>
+              {busy ? "Working…" : `Create the beats and add ${shopsToAdd} shops`}
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={clearImport}>
+              Close
+            </button>
+          </div>
+          {shopsWithoutBeat ? (
+            <p className="muted">{shopsWithoutBeat} shops have no beat name, so they will not be added.</p>
+          ) : null}
+        </section>
       ) : null}
 
       <div className="toolbar">

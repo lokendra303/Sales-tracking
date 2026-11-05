@@ -372,17 +372,47 @@ export function readLeadSheet(buffer: Buffer) {
   }
 
   const sheet = book.Sheets[best.name];
-  const rows = XLSX.utils
-    .sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false, range: best.headerIndex })
-    .slice(0, 500)
-    .map((row, index) => ({ ...row, __excelRow: best.headerIndex + index + 2 }));
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+  const rows: Record<string, unknown>[] = [];
+  let headers: string[] | null = null;
+  let truncated = false;
+  for (let index = 0; index < matrix.length; index++) {
+    const line = matrix[index];
+    if (!Array.isArray(line)) continue;
+    const labels = line.map((cell) => headerKey(String(cell ?? "")));
+    const headerRow =
+      labels.includes("retailername") ||
+      (labels.includes("beatname") && labels.some((key) => key.includes("address") || key.includes("mobile") || key === "speciality"));
+    if (headerRow) {
+      const used = new Map<string, number>();
+      headers = line.map((cell, cellIndex) => {
+        const label = String(cell ?? "").trim() || `Column ${cellIndex + 1}`;
+        const count = used.get(label) ?? 0;
+        used.set(label, count + 1);
+        return count === 0 ? label : `${label}_${count}`;
+      });
+      continue;
+    }
+    if (!headers) continue;
+    if (rows.length >= 2000) {
+      truncated = true;
+      break;
+    }
+    const record: Record<string, unknown> = { __excelRow: index + 1 };
+    headers.forEach((header, cellIndex) => {
+      record[header] = line[cellIndex] ?? "";
+    });
+    rows.push(record);
+  }
   const skippedBeatTab = book.SheetNames.length > 1 && book.SheetNames[0] !== best.name;
+  const notes = [
+    skippedBeatTab ? `Shops are read from “${best.name.trim()}”. The first tab only lists beats, so it was skipped.` : "",
+    truncated ? "Only the first 2000 shops were read." : "",
+  ].filter(Boolean);
   return {
     rows,
     sheetName: best.name.trim() || "Sheet",
-    note: skippedBeatTab
-      ? `Shops are read from “${best.name.trim()}”. The first tab only lists beats, so it was skipped.`
-      : "",
+    note: notes.join(" "),
   };
 }
 
@@ -499,11 +529,10 @@ function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImpo
   const potentialNum = potentialRaw ? Number(potentialRaw.replace(/[^\d.]/g, "")) : undefined;
   const repeatedHeader = headerKey(name) === "retailername" || headerKey(beatName) === "beatname";
   const blank = repeatedHeader || (!name && !phone && !rawPhone && !beatName && !street && !city);
+  const phoneNote = !blank && rawPhone && !phone ? `Mobile on sheet: ${rawPhone}` : "";
+  const notes = [sheetNotes(raw), phoneNote].filter(Boolean).join("\n");
   let reason = "";
-  if (!blank) {
-    if (!name) reason = "Retailer name is missing.";
-    else if (rawPhone && !phone) reason = `Mobile ${rawPhone} is not a 10-digit number.`;
-  }
+  if (!blank && !name) reason = "Retailer name is missing.";
   return {
     row: rowNumber,
     name,
@@ -513,7 +542,7 @@ function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImpo
     businessType,
     address,
     city,
-    notes: sheetNotes(raw),
+    notes,
     potential: potentialNum && Number.isFinite(potentialNum) ? potentialNum : undefined,
     mapsLink,
     latitude,
@@ -527,18 +556,17 @@ function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImpo
 }
 
 async function markImportDuplicates(tenantId: number, rows: ParsedImportRow[]) {
-  const phones = rows.filter((row) => row.ready && row.phone).map((row) => row.phone);
-  const [existingLeads, existingCustomers] = await Promise.all([
-    prisma.lead.findMany({ where: { tenantId, phone: { in: phones } }, select: { phone: true } }),
-    prisma.customer.findMany({ where: { tenantId, phone: { in: phones } }, select: { phone: true } }),
-  ]);
-  const taken = new Set([...existingLeads.map((item) => item.phone), ...existingCustomers.map((item) => item.phone)]);
   const seen = new Set<string>();
   return rows.map((row) => {
     if (!row.ready || !row.phone) return row;
-    if (seen.has(row.phone)) return { ...row, ready: false, reason: "This mobile is repeated in the sheet." };
+    if (seen.has(row.phone)) {
+      return {
+        ...row,
+        phone: "",
+        notes: [`Mobile on sheet: ${row.phone}`, row.notes].filter(Boolean).join("\n"),
+      };
+    }
     seen.add(row.phone);
-    if (taken.has(row.phone)) return { ...row, ready: false, reason: "This mobile is already a lead." };
     return row;
   });
 }
@@ -583,21 +611,13 @@ export async function importLeads(input: {
   userId: number;
   roles: RoleCode[];
   rows: Record<string, unknown>[];
-  beatByName: Record<string, number>;
+  beatByName?: Record<string, number>;
+  hqId?: number;
   keepRows?: number[];
 }) {
   if (!isManager(input.roles)) {
     throw forbidden("Only managers import leads.");
   }
-  const beatIds = [...new Set(Object.values(input.beatByName))];
-  if (!beatIds.length) throw badRequest("No beat is selected. A shop is added only when its beat already exists.");
-  const beats = await prisma.beat.findMany({
-    where: { tenantId: input.tenantId, id: { in: beatIds }, active: true },
-    select: { id: true, assigneeId: true },
-  });
-  if (beats.length !== beatIds.length) throw badRequest("One of the selected beats was not found.");
-  const beatById = new Map(beats.map((beat) => [beat.id, beat]));
-
   const parsed = await markImportDuplicates(
     input.tenantId,
     input.rows.map(parseImportRow).filter((row) => !row.blank),
@@ -606,6 +626,55 @@ export async function importLeads(input: {
   const skipped: { row: number; name: string; phone: string; reason: string }[] = [];
   const sequence = new Map<number, number>();
   const keep = input.keepRows ? new Set(input.keepRows) : null;
+  const beatByName = input.beatByName ?? {};
+  const beatById = new Map<number, { id: number; assigneeId: number | null }>();
+  const beatIdBySheetName = new Map<string, number>();
+  let beatsCreated = 0;
+
+  const wantedNames = [
+    ...new Set(
+      parsed
+        .filter((row) => row.ready && row.beatName.trim() && (!keep || keep.has(row.row)))
+        .map((row) => row.beatName.trim()),
+    ),
+  ];
+
+  if (input.hqId) {
+    const hq = await prisma.hq.findFirst({ where: { id: input.hqId, tenantId: input.tenantId } });
+    if (!hq) throw notFound("HQ not found.");
+    if (!wantedNames.length) throw badRequest("The sheet has no beat names, so no beats were created.");
+    const existing = await prisma.beat.findMany({
+      where: { tenantId: input.tenantId, hqId: hq.id, active: true },
+      select: { id: true, name: true, assigneeId: true },
+    });
+    const byName = new Map(existing.map((beat) => [beat.name.trim().toLowerCase(), beat]));
+    for (const beatName of wantedNames) {
+      const name = beatName.slice(0, 120);
+      const key = name.toLowerCase();
+      let beat = byName.get(key);
+      if (!beat) {
+        beat = await prisma.beat.create({
+          data: { tenantId: input.tenantId, name, hqId: hq.id, territory: hq.name },
+          select: { id: true, name: true, assigneeId: true },
+        });
+        byName.set(key, beat);
+        beatsCreated += 1;
+      }
+      beatById.set(beat.id, beat);
+      beatIdBySheetName.set(beatName, beat.id);
+      beatIdBySheetName.set(name, beat.id);
+    }
+  } else {
+    const beatIds = [...new Set(Object.values(beatByName))];
+    if (!beatIds.length) throw badRequest("Choose the headquarters these beats should join.");
+    const beats = await prisma.beat.findMany({
+      where: { tenantId: input.tenantId, id: { in: beatIds }, active: true },
+      select: { id: true, assigneeId: true },
+    });
+    if (beats.length !== beatIds.length) throw badRequest("One of the selected beats was not found.");
+    for (const beat of beats) beatById.set(beat.id, beat);
+    for (const [name, id] of Object.entries(beatByName)) beatIdBySheetName.set(name, id);
+  }
 
   for (const row of parsed) {
     if (keep && !keep.has(row.row)) {
@@ -621,7 +690,7 @@ export async function importLeads(input: {
       skipped.push({ row: row.row, name: row.name, phone: row.rawPhone || row.phone, reason: row.reason });
       continue;
     }
-    const beatId = input.beatByName[row.beatName];
+    const beatId = beatIdBySheetName.get(row.beatName) ?? beatIdBySheetName.get(row.beatName.trim());
     const beat = beatId ? beatById.get(beatId) : undefined;
     if (!beat) {
       skipped.push({
@@ -642,6 +711,34 @@ export async function importLeads(input: {
       longitude = found?.lng ?? longitude;
     }
     const assigneeId = beat.assigneeId;
+    if (row.phone) {
+      const existing = await prisma.lead.findFirst({
+        where: { tenantId: input.tenantId, phone: row.phone },
+        select: { id: true },
+      });
+      if (existing) {
+        const already = await prisma.beatMember.findFirst({
+          where: { beatId: beat.id, leadId: existing.id },
+          select: { id: true },
+        });
+        if (!already) {
+          if (!sequence.has(beat.id)) {
+            const last = await prisma.beatMember.findFirst({
+              where: { beatId: beat.id },
+              orderBy: { sequence: "desc" },
+            });
+            sequence.set(beat.id, last?.sequence ?? 0);
+          }
+          const next = (sequence.get(beat.id) ?? 0) + 1;
+          sequence.set(beat.id, next);
+          await prisma.beatMember.create({
+            data: { beatId: beat.id, leadId: existing.id, sequence: next },
+          });
+        }
+        created.push(publicLead(await prisma.lead.findFirstOrThrow({ where: { id: existing.id }, include: leadInclude })));
+        continue;
+      }
+    }
     const lead = await prisma.lead.create({
       data: {
         tenantId: input.tenantId,
@@ -683,7 +780,7 @@ export async function importLeads(input: {
     }
   }
 
-  return { created: created.length, skipped: skipped.length, leads: created, errors: skipped };
+  return { created: created.length, skipped: skipped.length, beatsCreated, leads: created, errors: skipped };
 }
 
 export async function importedBeatPlaces(tenantId: number, roles: RoleCode[]) {

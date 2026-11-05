@@ -34,7 +34,7 @@ function keepRowsFromBody(body: unknown) {
       throw badRequest("The shop list could not be read.");
     }
   }
-  return z.array(z.coerce.number().int().positive()).max(500).parse(parsed);
+  return z.array(z.coerce.number().int().positive()).max(2000).parse(parsed);
 }
 
 function beatByNameFromBody(body: unknown) {
@@ -180,12 +180,16 @@ crmRouter.post(
   importUpload.single("file"),
   asyncHandler(async (req, res) => {
     const sheet = rowsFromSheet(req.file);
+    const hqRaw = typeof req.body?.hqId === "string" || typeof req.body?.hqId === "number" ? String(req.body.hqId) : "";
+    const hqId = hqRaw ? Number(hqRaw) : undefined;
+    if (hqRaw && !Number.isInteger(hqId)) throw badRequest("Choose a headquarters.");
     const data = await crm.importLeads({
       tenantId: req.auth!.tenantId,
       userId: req.auth!.userId,
       roles: req.auth!.roles,
       rows: sheet.rows,
-      beatByName: beatByNameFromBody(req.body),
+      hqId,
+      beatByName: hqId ? {} : beatByNameFromBody(req.body),
       keepRows: keepRowsFromBody(req.body),
     });
     res.status(201).json({ success: true, data });
