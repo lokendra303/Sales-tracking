@@ -1106,3 +1106,105 @@ export async function teamCoverageToday(tenantId: number) {
   }
   return { date, people: rows };
 }
+
+export async function visitPlan(tenantId: number) {
+  const date = isoDay();
+  const people = await prisma.user.findMany({
+    where: {
+      tenantId,
+      status: "ACTIVE",
+      roles: { some: { role: { code: "SALES_EXECUTIVE" } } },
+      NOT: { roles: { some: { role: { code: { in: ["ADMIN", "MANAGER"] } } } } },
+    },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  if (!people.length) return { date, people: [] };
+
+  const ids = people.map((person) => person.id);
+  const { start, end } = parseDay(date);
+  const [ownedBeats, visits] = await Promise.all([
+    prisma.beat.findMany({
+      where: { tenantId, active: true, assigneeId: { in: ids } },
+      select: {
+        id: true,
+        name: true,
+        territory: true,
+        assigneeId: true,
+        members: {
+          orderBy: { sequence: "asc" },
+          select: {
+            sequence: true,
+            leadId: true,
+            customerId: true,
+            lead: { select: { name: true, phone: true, city: true } },
+            customer: { select: { name: true, phone: true, city: true } },
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+    }),
+    prisma.visit.findMany({
+      where: { tenantId, userId: { in: ids }, checkedInAt: { gte: start, lte: end } },
+      select: { userId: true, leadId: true, customerId: true, status: true, outcome: true, checkedInAt: true },
+      orderBy: { checkedInAt: "desc" },
+    }),
+  ]);
+
+  const rows = [];
+  for (const person of people) {
+    const ensured = await ensureScheduledDayStops(tenantId, person.id, date);
+    const mine = visits.filter((visit) => visit.userId === person.id);
+    const leads = ensured.stops.map((stop) => {
+      const place = stop.lead ?? stop.customer;
+      const matches = mine.filter(
+        (visit) =>
+          Boolean(stop.leadId && visit.leadId === stop.leadId) ||
+          Boolean(stop.customerId && visit.customerId === stop.customerId),
+      );
+      const working = matches.some((visit) => visit.status === "IN_PROGRESS");
+      const done = matches.some((visit) => visit.status === "COMPLETED" && visit.outcome !== "LATER");
+      return {
+        sequence: stop.sequence,
+        leadId: stop.leadId,
+        customerId: stop.customerId,
+        name: place?.name ?? "Stop",
+        phone: place?.phone ?? null,
+        city: place?.city ?? null,
+        state: done ? "done" : working ? "working" : "left",
+      };
+    });
+    const done = leads.filter((lead) => lead.state === "done").length;
+    rows.push({
+      userId: person.id,
+      name: person.name,
+      beatId: ensured.beat?.id ?? null,
+      beatName: ensured.beat?.name ?? null,
+      territory: ensured.beat?.territory ?? null,
+      beats: ownedBeats
+        .filter((beat) => beat.assigneeId === person.id)
+        .map((beat) => ({
+          id: beat.id,
+          name: beat.name,
+          territory: beat.territory,
+          shops: beat.members.length,
+          leads: beat.members.map((member) => {
+            const place = member.lead ?? member.customer;
+            return {
+              sequence: member.sequence,
+              leadId: member.leadId,
+              customerId: member.customerId,
+              name: place?.name ?? "Stop",
+              phone: place?.phone ?? null,
+              city: place?.city ?? null,
+            };
+          }),
+        })),
+      leads,
+      total: leads.length,
+      done,
+      left: leads.length - done,
+    });
+  }
+  return { date, people: rows };
+}

@@ -62,6 +62,7 @@ export function TeamPage() {
   const [issued, setIssued] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const iAmOwner = Boolean(user?.isOwner);
   const salesPeople = people.filter((person) => person.roles.includes("SALES_EXECUTIVE") && !person.roles.includes("MANAGER"));
   const editingPerson = editingId ? salesPeople.find((p) => p.id === editingId) : null;
@@ -85,6 +86,7 @@ export function TeamPage() {
   }
 
   function startEdit(person: Person) {
+    setFormOpen(true);
     setEditingId(person.id);
     setIssued("");
     setError("");
@@ -103,7 +105,16 @@ export function TeamPage() {
     });
   }
 
-  function cancelEdit() {
+  function openAdd() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setError("");
+    setShowMore(false);
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
     setEditingId(null);
     setForm(emptyForm);
     setError("");
@@ -141,7 +152,7 @@ export function TeamPage() {
           }),
         });
         setIssued(passwordChanged && nextPassword ? `Details updated. Password is now ${nextPassword}.` : "Details updated.");
-        cancelEdit();
+        closeForm();
       } else {
         await api("/users", {
           method: "POST",
@@ -160,8 +171,7 @@ export function TeamPage() {
           }),
         });
         setIssued(`Give this salesperson ${form.phone} / ${form.password}. They log in only on the SalesTrack phone app.`);
-        setForm(emptyForm);
-        setShowMore(false);
+        closeForm();
       }
       await load();
     } catch (err) {
@@ -180,8 +190,22 @@ export function TeamPage() {
         in with their mobile number and password.
       </p>
 
+      {!formOpen ? (
+        <div className="toolbar">
+          <button className="btn green" type="button" onClick={openAdd}>
+            Add person
+          </button>
+        </div>
+      ) : null}
+
+      {formOpen ? (
       <form className="card form wide form-compact" onSubmit={onSubmit}>
-        <h2>{editingId ? "Edit salesperson" : "Add salesperson"}</h2>
+        <div className="toolbar">
+          <h2 style={{ margin: 0 }}>{editingId ? "Edit salesperson" : "Add person"}</h2>
+          <button className="btn" type="button" onClick={closeForm}>
+            Close
+          </button>
+        </div>
         <div className="grid-3">
           <label>
             Full name *
@@ -281,15 +305,14 @@ export function TeamPage() {
 
         <div className="actions">
           <button className="btn green" disabled={busy}>
-            {busy ? "Saving…" : editingId ? "Save changes" : "Add salesperson"}
+            {busy ? "Saving…" : editingId ? "Save changes" : "Add person"}
           </button>
-          {editingId ? (
-            <button type="button" className="btn" onClick={cancelEdit}>
-              Cancel
-            </button>
-          ) : null}
+          <button type="button" className="btn" onClick={closeForm}>
+            Close
+          </button>
         </div>
       </form>
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
       {issued ? <p className="on">{issued}</p> : null}
 

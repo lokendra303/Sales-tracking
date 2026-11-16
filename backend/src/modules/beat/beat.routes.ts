@@ -335,3 +335,12 @@ beatRouter.get(
     res.json({ success: true, data });
   }),
 );
+
+beatRouter.get(
+  "/visit-plan",
+  requireRole("MANAGER"),
+  asyncHandler(async (req, res) => {
+    const data = await beat.visitPlan(req.auth!.tenantId);
+    res.json({ success: true, data });
+  }),
+);

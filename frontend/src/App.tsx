@@ -18,6 +18,7 @@ const SalesPage = lazy(() => import("./pages/SalesPage").then((m) => ({ default:
 const MapPage = lazy(() => import("./pages/MapPage").then((m) => ({ default: m.MapPage })));
 const ReportsPage = lazy(() => import("./pages/ReportsPage").then((m) => ({ default: m.ReportsPage })));
 const BeatPage = lazy(() => import("./pages/BeatPage").then((m) => ({ default: m.BeatPage })));
+const VisitPlanPage = lazy(() => import("./pages/VisitPlanPage").then((m) => ({ default: m.VisitPlanPage })));
 const RegisterPage = lazy(() => import("./pages/RegisterPage").then((m) => ({ default: m.RegisterPage })));
 const RegistrationsPage = lazy(() => import("./pages/RegistrationsPage").then((m) => ({ default: m.RegistrationsPage })));
 
@@ -54,6 +55,7 @@ export function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/team" element={isManager(user.roles) ? <TeamPage /> : <Navigate to="/registrations" replace />} />
         <Route path="/beat" element={isManager(user.roles) ? <BeatPage /> : <Navigate to="/" replace />} />
+        <Route path="/visit-plan" element={isManager(user.roles) ? <VisitPlanPage /> : <Navigate to="/" replace />} />
         <Route path="/leads" element={isManager(user.roles) ? <LeadsPage /> : <Navigate to="/" replace />} />
         <Route path="/leads/:id" element={isManager(user.roles) ? <LeadDetailPage /> : <Navigate to="/" replace />} />
         <Route path="/visits" element={isManager(user.roles) ? <VisitsPage /> : <Navigate to="/" replace />} />

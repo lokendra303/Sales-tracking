@@ -7,6 +7,7 @@ const titles: Record<string, string> = {
   "/": "Overview",
   "/team": "People",
   "/beat": "Beat desk",
+  "/visit-plan": "Visit plan",
   "/leads": "Pipeline",
   "/visits": "Visit proof",
   "/sales": "Sales book",
@@ -49,10 +50,11 @@ export function AppLayout() {
           </NavLink>
           {manager ? <NavLink to="/team">Team</NavLink> : null}
           {manager ? <NavLink to="/beat">Beat desk</NavLink> : null}
-          {manager ? <NavLink to="/leads">Pipeline</NavLink> : null}
+          {manager ? <NavLink to="/visit-plan">Visit plan</NavLink> : null}
           {manager ? <NavLink to="/visits">Visit proof</NavLink> : null}
           {manager ? <NavLink to="/sales">Sales book</NavLink> : null}
           {manager ? <NavLink to="/map">Live map</NavLink> : null}
+          {manager ? <NavLink to="/leads">Pipeline</NavLink> : null}
           {manager ? <NavLink to="/reports">Reports</NavLink> : null}
           {platform ? <NavLink to="/registrations">Managers</NavLink> : null}
           {admin || manager ? <NavLink to="/settings">Company</NavLink> : null}

@@ -154,6 +154,11 @@ export function BeatPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hqFormOpen, setHqFormOpen] = useState(false);
+  const [beatFormOpen, setBeatFormOpen] = useState(false);
+  const [manageHqs, setManageHqs] = useState(false);
+  const [detailTab, setDetailTab] = useState<"shops" | "plan">("shops");
+  const [addStopOpen, setAddStopOpen] = useState(false);
 
   const selected = beats.find((b) => b.id === selectedBeatId) ?? null;
 
@@ -303,6 +308,7 @@ export function BeatPage() {
       setHqDraft("");
       setHqChoice(String(data.id));
       setHqFilter(String(data.id));
+      setHqFormOpen(false);
       setNotice(`HQ “${data.name}” is ready. Create a beat under it.`);
       await loadHqs();
     } catch (err) {
@@ -335,7 +341,9 @@ export function BeatPage() {
       });
       setNewName("");
       setNewHqName("");
-      setNotice(`Created “${data.name}”. Add the shops below, then assign a salesperson.`);
+      setBeatFormOpen(false);
+      setDetailTab("shops");
+      setNotice(`Created “${data.name}”. Add the shops, then assign a salesperson.`);
       await Promise.all([loadBeats(), loadHqs()]);
       setSelectedBeatId(data.id);
     } catch (err) {
@@ -607,221 +615,211 @@ export function BeatPage() {
   }
 
   return (
-    <div className="page wide">
-      <p className="kicker">Field plan</p>
-      <h1>Beats</h1>
-      <p className="muted">
-        Add an HQ, create a beat under it, then add the shops and assign a salesperson.
-        Pick any cycle from 2 to 30 days. The phone shows that beat as today’s task on the chosen days. You do not set it again each morning.
-      </p>
-
-      <div className="toolbar">
-        <button className={`btn ${tab === "beats" ? "blue" : ""}`} type="button" onClick={() => setTab("beats")}>
-          Permanent beats
-        </button>
-        <button className={`btn ${tab === "schedule" ? "blue" : ""}`} type="button" onClick={() => setTab("schedule")}>
-          Dynamic schedule
-        </button>
+    <div className="page wide beat-desk">
+      <div className="beat-head">
+        <div>
+          <p className="kicker">Field plan</p>
+          <h1>Beats</h1>
+        </div>
+        <div className="toolbar" style={{ margin: 0 }}>
+          <button className={`btn ${tab === "beats" ? "blue" : ""}`} type="button" onClick={() => setTab("beats")}>
+            Beats
+          </button>
+          <button className={`btn ${tab === "schedule" ? "blue" : ""}`} type="button" onClick={() => setTab("schedule")}>
+            Schedule
+          </button>
+        </div>
       </div>
-
-      <h2>Headquarters</h2>
-      <div className="toolbar">
-        <input
-          value={hqDraft}
-          onChange={(e) => setHqDraft(e.target.value)}
-          placeholder="New HQ e.g. New Delhi"
-          style={{ flex: 1, minWidth: 180 }}
-        />
-        <button className="btn" type="button" disabled={busy || !hqDraft.trim()} onClick={addHq}>
-          Add HQ
-        </button>
-        <select value={hqFilter} onChange={(e) => setHqFilter(e.target.value)} style={{ minWidth: 220 }}>
-          <option value="all">All HQ · {beats.length} beats</option>
-          {hqs.map((hq) => (
-            <option key={hq.id} value={hq.id}>
-              {hq.name} · {hq.beatCount} beat{hq.beatCount === 1 ? "" : "s"}
-            </option>
-          ))}
-        </select>
-      </div>
-      {!hqs.length ? <p className="muted">No HQ yet. Add one above, then create beats under it.</p> : (
-        <>
-          <div className="toolbar">
-            <label className="check-row" style={{ margin: 0 }}>
-              <input
-                type="checkbox"
-                checked={hqs.length > 0 && hqs.every((hq) => pickedHqs.includes(hq.id))}
-                onChange={(event) => setPickedHqs(event.target.checked ? hqs.map((hq) => hq.id) : [])}
-              />
-              <span>Select all</span>
-            </label>
-            <button className="btn red" type="button" disabled={busy || !pickedHqs.length} onClick={() => deletePickedHqs()}>
-              {pickedHqs.length ? `Delete selected (${pickedHqs.length})` : "Delete selected"}
-            </button>
-          </div>
-          <div className="list">
-            {hqs.map((hq) => (
-              <div key={hq.id} className="card person">
-                <label className="check-row" style={{ margin: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={pickedHqs.includes(hq.id)}
-                    onChange={(event) =>
-                      setPickedHqs((current) =>
-                        event.target.checked ? [...current, hq.id] : current.filter((id) => id !== hq.id),
-                      )
-                    }
-                    aria-label={`Select ${hq.name}`}
-                  />
-                  <span>
-                    <strong>{hq.name}</strong>
-                    <div className="muted">
-                      {hq.beatCount} beat{hq.beatCount === 1 ? "" : "s"}
-                    </div>
-                  </span>
-                </label>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      <p className="muted">Choose a headquarters, open a beat, then add shops or set the days.</p>
       {notice ? <p className="on">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
       {tab === "beats" ? (
           <section>
-            <h2>Create beat</h2>
-            <p className="muted">Name the beat and choose its HQ. Shops are added on the beat after it exists.</p>
-            <div className="toolbar">
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Beat name e.g. Beat 1"
-                style={{ flex: 1, minWidth: 140 }}
-              />
-              <select value={hqChoice} onChange={(e) => setHqChoice(e.target.value)} style={{ minWidth: 160 }}>
-                <option value="">Select HQ</option>
+            <div className="hq-bar">
+              <div className="chips" style={{ margin: 0 }}>
+                <button type="button" className={hqFilter === "all" ? "chip on" : "chip"} onClick={() => setHqFilter("all")}>
+                  All · {beats.length}
+                </button>
                 {hqs.map((hq) => (
-                  <option key={hq.id} value={hq.id}>
-                    {hq.name}
-                  </option>
+                  <button
+                    key={hq.id}
+                    type="button"
+                    className={hqFilter === String(hq.id) ? "chip on" : "chip"}
+                    onClick={() => setHqFilter(String(hq.id))}
+                  >
+                    {hq.name} · {hq.beatCount}
+                  </button>
                 ))}
-                <option value="new">Add new HQ</option>
-              </select>
-              {hqChoice === "new" ? (
+              </div>
+              <div className="toolbar" style={{ margin: 0 }}>
+                <button className="btn" type="button" onClick={() => setHqFormOpen((open) => !open)}>
+                  {hqFormOpen ? "Close" : "Add HQ"}
+                </button>
+                <button className="btn green" type="button" onClick={() => setBeatFormOpen((open) => !open)}>
+                  {beatFormOpen ? "Close" : "Create beat"}
+                </button>
+                <button className="btn" type="button" onClick={() => setManageHqs((open) => !open)}>
+                  {manageHqs ? "Done" : "Remove HQ"}
+                </button>
+              </div>
+            </div>
+
+            {hqFormOpen ? (
+              <div className="toolbar">
                 <input
-                  value={newHqName}
-                  onChange={(e) => setNewHqName(e.target.value)}
-                  placeholder="New HQ name"
+                  value={hqDraft}
+                  onChange={(e) => setHqDraft(e.target.value)}
+                  placeholder="New HQ e.g. New Delhi"
+                  style={{ flex: 1, minWidth: 180 }}
+                />
+                <button className="btn green" type="button" disabled={busy || !hqDraft.trim()} onClick={addHq}>
+                  Save HQ
+                </button>
+              </div>
+            ) : null}
+
+            {beatFormOpen ? (
+              <div className="toolbar">
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Beat name e.g. Beat 1"
                   style={{ flex: 1, minWidth: 140 }}
                 />
-              ) : null}
-              <button className="btn green" type="button" disabled={busy || !newName.trim()} onClick={createBeat}>
-                Create
-              </button>
-            </div>
-            <h2>
-              Beats
-              {hqFilter !== "all" ? (
-                <span className="muted"> · {hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name}</span>
-              ) : null}
-            </h2>
-            <div className="toolbar">
-              <label className="check-row" style={{ margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={listedBeats.length > 0 && listedBeats.every((beat) => pickedBeats.includes(beat.id))}
-                  onChange={(event) => setPickedBeats(event.target.checked ? listedBeats.map((beat) => beat.id) : [])}
-                  disabled={!listedBeats.length}
-                />
-                <span>Select all</span>
-              </label>
-              <button className="btn red" type="button" disabled={busy || !pickedBeats.length} onClick={() => deletePickedBeats()}>
-                {pickedBeats.length ? `Delete selected (${pickedBeats.length})` : "Delete selected"}
-              </button>
-            </div>
-            <div className="list">
-              {listedBeats.map((b) => (
-                  <div
-                    key={b.id}
-                    className={`card person pick ${selectedBeatId === b.id ? "picked" : ""}`}
-                    onClick={() => setSelectedBeatId(b.id)}
-                  >
-                    <label className="check-row" style={{ margin: 0 }} onClick={(event) => event.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={pickedBeats.includes(b.id)}
-                        onChange={(event) =>
-                          setPickedBeats((current) =>
-                            event.target.checked ? [...current, b.id] : current.filter((id) => id !== b.id),
-                          )
-                        }
-                        aria-label={`Select ${b.name}`}
-                      />
+                <select value={hqChoice} onChange={(e) => setHqChoice(e.target.value)} style={{ minWidth: 160 }}>
+                  <option value="">Select HQ</option>
+                  {hqs.map((hq) => (
+                    <option key={hq.id} value={hq.id}>
+                      {hq.name}
+                    </option>
+                  ))}
+                  <option value="new">Add new HQ</option>
+                </select>
+                {hqChoice === "new" ? (
+                  <input
+                    value={newHqName}
+                    onChange={(e) => setNewHqName(e.target.value)}
+                    placeholder="New HQ name"
+                    style={{ flex: 1, minWidth: 140 }}
+                  />
+                ) : null}
+                <button className="btn green" type="button" disabled={busy || !newName.trim()} onClick={createBeat}>
+                  Create
+                </button>
+              </div>
+            ) : null}
+
+            {manageHqs ? (
+              <div className="card" style={{ marginTop: 12 }}>
+                {!hqs.length ? (
+                  <p className="muted">No headquarters yet. Add one, then create beats under it.</p>
+                ) : (
+                  <>
+                    <div className="toolbar" style={{ marginTop: 0 }}>
+                      <label className="check-row" style={{ margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={hqs.length > 0 && hqs.every((hq) => pickedHqs.includes(hq.id))}
+                          onChange={(event) => setPickedHqs(event.target.checked ? hqs.map((hq) => hq.id) : [])}
+                        />
+                        <span>Select all</span>
+                      </label>
+                      <button className="btn red" type="button" disabled={busy || !pickedHqs.length} onClick={() => deletePickedHqs()}>
+                        {pickedHqs.length ? `Delete selected (${pickedHqs.length})` : "Delete selected"}
+                      </button>
+                    </div>
+                    <p className="muted">Deleting a headquarters leaves the beats. They just lose that HQ.</p>
+                    <div className="list" style={{ marginTop: 8 }}>
+                      {hqs.map((hq) => (
+                        <label key={hq.id} className="check-row" style={{ margin: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={pickedHqs.includes(hq.id)}
+                            onChange={(event) =>
+                              setPickedHqs((current) =>
+                                event.target.checked ? [...current, hq.id] : current.filter((id) => id !== hq.id),
+                              )
+                            }
+                            aria-label={`Select ${hq.name}`}
+                          />
+                          <span>
+                            {hq.name} · {hq.beatCount} beat{hq.beatCount === 1 ? "" : "s"}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            <div className="beat-layout">
+              <div className="beat-side">
+                <div className="toolbar" style={{ marginTop: 0 }}>
+                  <label className="check-row" style={{ margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={listedBeats.length > 0 && listedBeats.every((beat) => pickedBeats.includes(beat.id))}
+                      onChange={(event) => setPickedBeats(event.target.checked ? listedBeats.map((beat) => beat.id) : [])}
+                      disabled={!listedBeats.length}
+                    />
+                    <span>Select all</span>
+                  </label>
+                  <button className="btn red" type="button" disabled={busy || !pickedBeats.length} onClick={() => deletePickedBeats()}>
+                    {pickedBeats.length ? `Delete (${pickedBeats.length})` : "Delete"}
+                  </button>
+                </div>
+                <div className="beat-rail">
+                  {listedBeats.map((b) => (
+                    <div
+                      key={b.id}
+                      className={`card beat-row pick ${selectedBeatId === b.id ? "picked" : ""}`}
+                      onClick={() => setSelectedBeatId(b.id)}
+                    >
+                      <label className="check-row" style={{ margin: 0 }} onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={pickedBeats.includes(b.id)}
+                          onChange={(event) =>
+                            setPickedBeats((current) =>
+                              event.target.checked ? [...current, b.id] : current.filter((id) => id !== b.id),
+                            )
+                          }
+                          aria-label={`Select ${b.name}`}
+                        />
+                      </label>
                       <span>
                         <strong>{b.name}</strong>
                         <div className="muted">
-                          {b.assigneeName ?? "No salesperson"} · {b.territory || "No HQ"} · {b.size} stops
-                        </div>
-                        <div className="muted">
-                          {b.planDates?.length
-                            ? `Dates: ${b.planDates.slice(0, 4).map((iso) => formatPlanDate(iso)).join(", ")}${b.planDates.length > 4 ? ` +${b.planDates.length - 4} more` : ""}`
-                            : "No calendar dates"}
+                          {b.assigneeName ?? "No salesperson"} · {b.size} shops
                         </div>
                       </span>
-                    </label>
-                  </div>
-                ))}
-              {!listedBeats.length ? (
-                <p className="muted">
-                  {hqFilter === "all"
-                    ? "No beats yet. Create one above."
-                    : `No beats for ${hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name ?? "this HQ"}. Pick another HQ or create a beat.`}
-                </p>
-              ) : null}
-            </div>
-
-            <h2>Who gets which beat</h2>
-            <p className="muted">
-              Each row is one saved date: the day, the beat, and the salesperson. Click a row to open that beat.
-            </p>
-            <div className="list plan-list">
-              {dateRows.map((row) => (
-                <button
-                  key={`${row.beatId}-${row.iso}`}
-                  type="button"
-                  className={`card person pick ${selectedBeatId === row.beatId ? "picked" : ""}`}
-                  onClick={() => {
-                    setSelectedBeatId(row.beatId);
-                    const [year, month] = row.iso.split("-").map(Number);
-                    if (year && month) setCalMonth(new Date(year, month - 1, 1));
-                  }}
-                >
-                  <div>
-                    <strong>{formatPlanDate(row.iso, true)}</strong>
-                    <div className="muted">
-                      {row.beatName} · {row.hq}
                     </div>
-                  </div>
-                  <strong>{row.person}</strong>
-                </button>
-              ))}
-              {!dateRows.length ? (
-                <p className="muted">No dates saved yet. Open a beat, pick days on the calendar, then save the assignment plan.</p>
-              ) : null}
-            </div>
-
-            {selected ? (
-              <>
-                <div className="toolbar" style={{ marginTop: 16 }}>
-                  <h2 style={{ margin: 0, flex: 1 }}>
-                    {selected.name} · {selected.size} stops · {selected.territory || "No HQ"}
-                  </h2>
-                  <button className="btn red" type="button" disabled={busy} onClick={() => removeBeat()}>
-                    Delete beat
-                  </button>
+                  ))}
+                  {!listedBeats.length ? (
+                    <p className="muted">
+                      {hqFilter === "all"
+                        ? "No beats yet. Create one above."
+                        : `No beats for ${hqFilter === "none" ? "No HQ" : hqs.find((hq) => String(hq.id) === hqFilter)?.name ?? "this HQ"}.`}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="toolbar">
+              </div>
+
+              {selected ? (
+                <section className="card beat-panel">
+                  <div className="beat-panel-head">
+                    <div>
+                      <h2 style={{ margin: 0 }}>{selected.name}</h2>
+                      <p className="muted">
+                        {selected.territory || "No HQ"} · {selected.size} shop{selected.size === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <button className="btn red" type="button" disabled={busy} onClick={() => removeBeat()}>
+                      Delete beat
+                    </button>
+                  </div>
                   <label className="muted">
                     Salesperson{" "}
                     <select
@@ -837,171 +835,227 @@ export function BeatPage() {
                       ))}
                     </select>
                   </label>
-                </div>
-                <p className="muted">
-                  Repeating plan. Choose 2 to 30 days. The selected days come back after that many days, so you do not assign the beat again.
-                </p>
-                <div className="toolbar">
-                  <label className="muted">
-                    Repeat every{" "}
-                    <input
-                      type="number"
-                      min={2}
-                      max={30}
-                      value={repeatEvery}
-                      disabled={busy}
-                      onChange={(e) => {
-                        const next = Math.min(30, Math.max(2, Number(e.target.value) || 2));
-                        setRepeatEvery(next);
-                        setPlanDays(next === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
-                      }}
-                      style={{ width: 72 }}
-                    />{" "}
-                    days
-                  </label>
-                  {[7, 15, 30].map((count) => (
-                    <button
-                      key={count}
-                      className={`btn ${repeatEvery === count ? "blue" : ""}`}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setRepeatEvery(count);
-                        setPlanDays(count === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
-                      }}
-                    >
-                      {count}d
+                  <div className="beat-tabs">
+                    <button type="button" className={detailTab === "shops" ? "chip on" : "chip"} onClick={() => setDetailTab("shops")}>
+                      Shops
                     </button>
-                  ))}
-                </div>
-                <div className="chips">
-                  {repeatEvery === 7
-                    ? DAY_ORDER.map((day) => (
-                        <button
-                          key={day}
-                          type="button"
-                          className={planDays.includes(day) ? "chip on" : "chip"}
-                          onClick={() =>
-                            setPlanDays((current) =>
-                              current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
-                            )
-                          }
-                        >
-                          {DAY_LABEL[day]}
-                        </button>
-                      ))
-                    : Array.from({ length: repeatEvery }, (_, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          className={planDays.includes(index) ? "chip on" : "chip"}
-                          onClick={() =>
-                            setPlanDays((current) =>
-                              current.includes(index) ? current.filter((item) => item !== index) : [...current, index],
-                            )
-                          }
-                        >
-                          {index + 1}
-                        </button>
-                      ))}
-                  <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveRepeat}>
-                    Save repeating plan
-                  </button>
-                </div>
-                <p className="muted">
-                  {selected.assigneeName
-                    ? `These dates assign “${selected.name}” to ${selected.assigneeName}. A saved date is used instead of the repeating plan.`
-                    : `These dates are for “${selected.name}”. Choose a salesperson above before you can save them.`}
-                </p>
-                <AssignmentCalendar
-                  month={calMonth}
-                  dates={planDates}
-                  onMonth={setCalMonth}
-                  onToggle={(iso) =>
-                    setPlanDates((current) =>
-                      current.includes(iso) ? current.filter((day) => day !== iso) : [...current, iso].sort(),
-                    )
-                  }
-                />
-                {planDates.length ? (
-                  <div className="chips">
-                    {planDates.map((iso) => (
-                      <button key={iso} type="button" className="chip on" onClick={() => setPlanDates((current) => current.filter((day) => day !== iso))}>
-                        {formatPlanDate(iso, true)} · {selected.name} · {selected.assigneeName ?? "No salesperson"}
-                      </button>
-                    ))}
+                    <button type="button" className={detailTab === "plan" ? "chip on" : "chip"} onClick={() => setDetailTab("plan")}>
+                      Days
+                    </button>
                   </div>
-                ) : (
-                  <p className="muted">No dates yet. Click a day on the calendar.</p>
-                )}
-                <div className="toolbar">
-                  <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveDates}>
-                    Save assignment plan
-                  </button>
-                  <span className="muted">
-                    {selected.assigneeId
-                      ? planDates.length
-                        ? `${planDates.length} date${planDates.length === 1 ? "" : "s"} selected. A picked date is used instead of the repeating plan.`
-                        : "Save with no dates to clear this plan."
-                      : "Assign a salesperson before saving dates."}
-                  </span>
-                </div>
-                <div className="list">
-                  {selected.members.map((stop, index) => (
-                    <article key={stop.id} className="card person">
-                      <div>
-                        <strong>
-                          {stop.sequence}. {stop.name}
-                        </strong>
-                        <div className="muted">{[stop.phone, stop.city].filter(Boolean).join(" · ") || "—"}</div>
-                      </div>
-                      <div className="seq-btns">
-                        <button className="ghost" type="button" onClick={() => moveMember(index, -1)} disabled={index === 0 || busy}>
-                          Up
-                        </button>
-                        <button
-                          className="ghost"
-                          type="button"
-                          onClick={() => moveMember(index, 1)}
-                          disabled={index === selected.members.length - 1 || busy}
-                        >
-                          Down
-                        </button>
-                        <button className="link" type="button" onClick={() => removeMember(stop.id)} disabled={busy}>
-                          Remove
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                  {!selected.members.length ? <p className="muted">Add approved leads or customers below.</p> : null}
-                </div>
 
-                <h2>Add a stop</h2>
-                <input
-                  className="search"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search lead or customer"
-                />
-                <div className="list">
-                  {available.slice(0, 12).map((place) => (
-                    <article key={`${place.kind}-${place.id}`} className="card person">
-                      <div>
-                        <strong>{place.name}</strong>
-                        <div className="muted">
-                          {place.kind === "lead" ? "Lead" : "Customer"} · {place.phone}
-                          {place.city ? ` · ${place.city}` : ""}
-                        </div>
+                  {detailTab === "shops" ? (
+                    <>
+                      <div className="toolbar" style={{ marginTop: 0 }}>
+                        <button className="btn green" type="button" onClick={() => setAddStopOpen((open) => !open)}>
+                          {addStopOpen ? "Close" : "Add shop"}
+                        </button>
                       </div>
-                      <button className="btn green" type="button" disabled={busy} onClick={() => addPlace(place)}>
-                        Add
-                      </button>
-                    </article>
-                  ))}
-                  {!available.length ? <p className="muted">Everyone matching is already on this beat.</p> : null}
-                </div>
-              </>
-            ) : null}
+                      {addStopOpen ? (
+                        <>
+                          <input
+                            className="search"
+                            value={q}
+                            onChange={(e) => setQ(e.target.value)}
+                            placeholder="Search lead or customer"
+                          />
+                          <div className="list stop-scroll">
+                            {available.slice(0, 12).map((place) => (
+                              <article key={`${place.kind}-${place.id}`} className="card person stop-row">
+                                <div>
+                                  <strong>{place.name}</strong>
+                                  <div className="muted">
+                                    {place.kind === "lead" ? "Lead" : "Customer"} · {place.phone}
+                                    {place.city ? ` · ${place.city}` : ""}
+                                  </div>
+                                </div>
+                                <button className="btn green" type="button" disabled={busy} onClick={() => addPlace(place)}>
+                                  Add
+                                </button>
+                              </article>
+                            ))}
+                            {!available.length ? <p className="muted">Everyone matching is already on this beat.</p> : null}
+                          </div>
+                        </>
+                      ) : null}
+                      <div className="list">
+                        {selected.members.map((stop, index) => (
+                          <article key={stop.id} className="card person stop-row">
+                            <div>
+                              <strong>
+                                {stop.sequence}. {stop.name}
+                              </strong>
+                              <div className="muted">{[stop.phone, stop.city].filter(Boolean).join(" · ") || "—"}</div>
+                            </div>
+                            <div className="seq-btns">
+                              <button className="ghost" type="button" onClick={() => moveMember(index, -1)} disabled={index === 0 || busy}>
+                                Up
+                              </button>
+                              <button
+                                className="ghost"
+                                type="button"
+                                onClick={() => moveMember(index, 1)}
+                                disabled={index === selected.members.length - 1 || busy}
+                              >
+                                Down
+                              </button>
+                              <button className="link" type="button" onClick={() => removeMember(stop.id)} disabled={busy}>
+                                Remove
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                        {!selected.members.length ? <p className="muted">No shops on this beat yet.</p> : null}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="muted">
+                        Pick the days this beat repeats. A date you save on the calendar is used instead of the repeating days.
+                      </p>
+                      <div className="toolbar">
+                        <label className="muted">
+                          Repeat every{" "}
+                          <input
+                            type="number"
+                            min={2}
+                            max={30}
+                            value={repeatEvery}
+                            disabled={busy}
+                            onChange={(e) => {
+                              const next = Math.min(30, Math.max(2, Number(e.target.value) || 2));
+                              setRepeatEvery(next);
+                              setPlanDays(next === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
+                            }}
+                            style={{ width: 72 }}
+                          />{" "}
+                          days
+                        </label>
+                        {[7, 15, 30].map((count) => (
+                          <button
+                            key={count}
+                            className={`btn ${repeatEvery === count ? "blue" : ""}`}
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              setRepeatEvery(count);
+                              setPlanDays(count === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
+                            }}
+                          >
+                            {count}d
+                          </button>
+                        ))}
+                      </div>
+                      <div className="chips">
+                        {repeatEvery === 7
+                          ? DAY_ORDER.map((day) => (
+                              <button
+                                key={day}
+                                type="button"
+                                className={planDays.includes(day) ? "chip on" : "chip"}
+                                onClick={() =>
+                                  setPlanDays((current) =>
+                                    current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
+                                  )
+                                }
+                              >
+                                {DAY_LABEL[day]}
+                              </button>
+                            ))
+                          : Array.from({ length: repeatEvery }, (_, index) => (
+                              <button
+                                key={index}
+                                type="button"
+                                className={planDays.includes(index) ? "chip on" : "chip"}
+                                onClick={() =>
+                                  setPlanDays((current) =>
+                                    current.includes(index) ? current.filter((item) => item !== index) : [...current, index],
+                                  )
+                                }
+                              >
+                                {index + 1}
+                              </button>
+                            ))}
+                        <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveRepeat}>
+                          Save repeating plan
+                        </button>
+                      </div>
+                      <p className="muted">
+                        {selected.assigneeName
+                          ? `These dates assign “${selected.name}” to ${selected.assigneeName}.`
+                          : "Choose a salesperson before you can save dates."}
+                      </p>
+                      <AssignmentCalendar
+                        month={calMonth}
+                        dates={planDates}
+                        onMonth={setCalMonth}
+                        onToggle={(iso) =>
+                          setPlanDates((current) =>
+                            current.includes(iso) ? current.filter((day) => day !== iso) : [...current, iso].sort(),
+                          )
+                        }
+                      />
+                      {planDates.length ? (
+                        <div className="chips">
+                          {planDates.map((iso) => (
+                            <button key={iso} type="button" className="chip on" onClick={() => setPlanDates((current) => current.filter((day) => day !== iso))}>
+                              {formatPlanDate(iso, true)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="muted">No dates yet. Click a day on the calendar.</p>
+                      )}
+                      <div className="toolbar">
+                        <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveDates}>
+                          Save dates
+                        </button>
+                        <span className="muted">
+                          {selected.assigneeId
+                            ? planDates.length
+                              ? `${planDates.length} date${planDates.length === 1 ? "" : "s"} selected.`
+                              : "Save with no dates to clear this plan."
+                            : "Assign a salesperson before saving dates."}
+                        </span>
+                      </div>
+                      {dateRows.length ? (
+                        <>
+                          <h2>Saved dates</h2>
+                          <div className="list plan-list">
+                            {dateRows.map((row) => (
+                              <button
+                                key={`${row.beatId}-${row.iso}`}
+                                type="button"
+                                className={`card person pick stop-row ${selectedBeatId === row.beatId ? "picked" : ""}`}
+                                onClick={() => {
+                                  setSelectedBeatId(row.beatId);
+                                  setDetailTab("plan");
+                                  const [year, month] = row.iso.split("-").map(Number);
+                                  if (year && month) setCalMonth(new Date(year, month - 1, 1));
+                                }}
+                              >
+                                <div>
+                                  <strong>{formatPlanDate(row.iso, true)}</strong>
+                                  <div className="muted">
+                                    {row.beatName} · {row.hq}
+                                  </div>
+                                </div>
+                                <strong>{row.person}</strong>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
+                    </>
+                  )}
+                </section>
+              ) : (
+                <section className="card beat-panel">
+                  <h2>Open a beat</h2>
+                  <p className="muted">Pick a beat on the left to see its shops and days.</p>
+                </section>
+              )}
+            </div>
           </section>
         ) : (
           <section>
