@@ -308,17 +308,24 @@ export function LeadsPage() {
   }
 
   const importGroups = useMemo(() => {
-    const groups = new Map<string, ImportRow[]>();
+    const groups = new Map<string, { beatName: string; shops: ImportRow[] }>();
     for (const row of importRows) {
-      const shops = groups.get(row.beatName) ?? [];
-      shops.push(row);
-      groups.set(row.beatName, shops);
+      const label = row.beatName.trim();
+      const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "") || "__none__";
+      const current = groups.get(key) ?? { beatName: label, shops: [] };
+      if (label && (!current.beatName || current.shops.filter((shop) => shop.ready).length === 0)) {
+        current.beatName = label;
+      }
+      current.shops.push(row);
+      groups.set(key, current);
     }
-    return [...groups.entries()].map(([beatName, shops]) => ({
-      beatName,
-      shops,
-      count: shops.filter((shop) => shop.ready).length,
-    }));
+    return [...groups.values()]
+      .map((group) => ({
+        beatName: group.beatName,
+        shops: group.shops,
+        count: group.shops.filter((shop) => shop.ready).length,
+      }))
+      .filter((group) => group.count > 0 || !group.beatName.trim());
   }, [importRows]);
 
   const shopsToAdd = importGroups.reduce((sum, group) => sum + (group.beatName.trim() ? group.count : 0), 0);

@@ -11,6 +11,7 @@ type Member = {
   name: string;
   phone: string | null;
   city: string | null;
+  address: string | null;
 };
 type Beat = {
   id: number;
@@ -886,6 +887,7 @@ export function BeatPage() {
                                 {stop.sequence}. {stop.name}
                               </strong>
                               <div className="muted">{[stop.phone, stop.city].filter(Boolean).join(" · ") || "—"}</div>
+                              {stop.address ? <div className="muted">{stop.address}</div> : null}
                             </div>
                             <div className="seq-btns">
                               <button className="ghost" type="button" onClick={() => moveMember(index, -1)} disabled={index === 0 || busy}>

@@ -424,7 +424,14 @@ function publicBeat(row: {
   assigneeId: number | null;
   notes: string | null;
   assignee?: { name: string } | null;
-  members?: { id: number; sequence: number; leadId: number | null; customerId: number | null; lead: { name: string; phone: string; city: string | null } | null; customer: { name: string; phone: string; city: string | null } | null }[];
+  members?: {
+    id: number;
+    sequence: number;
+    leadId: number | null;
+    customerId: number | null;
+    lead: { name: string; phone: string; city: string | null; address?: string | null } | null;
+    customer: { name: string; phone: string; city: string | null; address?: string | null } | null;
+  }[];
   _count?: { members: number };
 }) {
   return {
@@ -449,6 +456,7 @@ function publicBeat(row: {
         name: place?.name ?? "Stop",
         phone: place?.phone ?? null,
         city: place?.city ?? null,
+        address: place?.address?.trim() || null,
       };
     }),
   };

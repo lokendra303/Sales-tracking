@@ -380,18 +380,28 @@ export function readLeadSheet(buffer: Buffer) {
     const line = matrix[index];
     if (!Array.isArray(line)) continue;
     const labels = line.map((cell) => headerKey(String(cell ?? "")));
-    const headerRow =
+    const looksLikeHeader =
       labels.includes("retailername") ||
       (labels.includes("beatname") && labels.some((key) => key.includes("address") || key.includes("mobile") || key === "speciality"));
-    if (headerRow) {
-      const used = new Map<string, number>();
-      headers = line.map((cell, cellIndex) => {
-        const label = String(cell ?? "").trim() || `Column ${cellIndex + 1}`;
-        const count = used.get(label) ?? 0;
-        used.set(label, count + 1);
-        return count === 0 ? label : `${label}_${count}`;
-      });
-      continue;
+    if (looksLikeHeader) {
+      // DRCP sheets reprint “Retailer Name” / “MSL NO” on section title rows while the Beat Name
+      // cell holds the real beat (“23,24,25, rohini”). Adopting that row as headers drops the
+      // title and remaps columns, so every later shop fill-downs into the previous beat.
+      const beatCol = headers?.findIndex((header) => headerKey(header) === "beatname") ?? -1;
+      const beatCell = beatCol >= 0 ? String(line[beatCol] ?? "").trim() : "";
+      const sectionTitleWithHeaderLabels =
+        Boolean(headers) && Boolean(beatCell) && headerKey(beatCell) !== "beatname";
+      if (!sectionTitleWithHeaderLabels) {
+        const used = new Map<string, number>();
+        headers = line.map((cell, cellIndex) => {
+          const label = String(cell ?? "").trim() || `Column ${cellIndex + 1}`;
+          const count = used.get(label) ?? 0;
+          used.set(label, count + 1);
+          return count === 0 ? label : `${label}_${count}`;
+        });
+        continue;
+      }
+      // Fall through and parse as a normal row under the existing headers.
     }
     if (!headers) continue;
     if (rows.length >= 2000) {
@@ -437,6 +447,132 @@ function cell(row: Record<string, unknown>, keys: string[], loose: string[] = []
     if (text) return text;
   }
   return "";
+}
+
+/** Beat Name, Route, Area — skip Beat No / Beat Avg style columns. */
+function beatNameFromRow(row: Record<string, unknown>) {
+  const exact = cell(row, ["beatname", "routename", "areaname", "beat"]);
+  if (exact) return exact;
+  const entries = Object.entries(row).filter(([key]) => key !== "__excelRow");
+  for (const [item, value] of entries) {
+    const key = headerKey(item);
+    if (!key.includes("beat") && !key.includes("route") && !key.includes("area")) continue;
+    if (key.includes("no") || key.includes("num") || key.includes("avg") || key.includes("pob") || key.includes("day") || key.includes("stockist")) {
+      continue;
+    }
+    const text = textValue(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+/** Same beat even when the sheet writes “Pitam pura 1” and “PITAMPURA 1”. */
+function beatKey(name: string) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function realBeatLabel(value: string) {
+  const beat = value.trim();
+  if (!beat) return "";
+  // Skip repeated header cells that landed in the Beat Name column.
+  if (headerKey(beat) === "beatname" || headerKey(beat) === "retailername") return "";
+  return beat;
+}
+
+/**
+ * Sheets often merge the Beat Name cell across a group, or leave it blank on the next shops
+ * under the same HQ. Carry the last beat / HQ name forward so those shops are not skipped.
+ * Title-only rows (beat name, no shop) still seed the fill-down, then get dropped later.
+ */
+function fillDownSheetNames(rows: ParsedImportRow[]) {
+  let lastBeat = "";
+  let lastHq = "";
+  return rows.map((row) => {
+    const beat = realBeatLabel(row.beatName);
+    const hq = row.hqName.trim();
+    if (beat) lastBeat = beat;
+    if (hq) lastHq = hq;
+    if (row.blank) return row;
+    const beatName = beat || lastBeat;
+    const hqName = hq || lastHq;
+    if (beatName === row.beatName && hqName === row.hqName) return row;
+    return { ...row, beatName, hqName };
+  });
+}
+
+/**
+ * DRCP sheets restart MSL at 1 for each beat. Excel often auto-fills the Beat Name column
+ * ("13 to 18 rohini", "14 to 18 rohini", …). Prefer the section title row; otherwise lock
+ * every shop in the MSL block to the name from MSL 1.
+ */
+function stabilizeBeatByMsl(rows: ParsedImportRow[]) {
+  let sectionBeat = "";
+  let fromTitle = false;
+  let lastMsl = 0;
+  return rows.map((row) => {
+    const beat = realBeatLabel(row.beatName);
+    if (row.blank) {
+      if (beat) {
+        sectionBeat = beat;
+        fromTitle = true;
+      }
+      return row;
+    }
+    const msl = row.mslNo;
+    if (msl == null || msl <= 0) {
+      if (beat) {
+        sectionBeat = beat;
+        fromTitle = false;
+      }
+      return row;
+    }
+    if (msl === 1 || (lastMsl > 0 && msl < lastMsl)) {
+      if (fromTitle && sectionBeat) {
+        fromTitle = false;
+      } else {
+        sectionBeat = beat || sectionBeat;
+        fromTitle = false;
+      }
+      lastMsl = msl;
+      return !sectionBeat || sectionBeat === row.beatName ? row : { ...row, beatName: sectionBeat };
+    }
+    lastMsl = msl;
+    fromTitle = false;
+    if (!sectionBeat) sectionBeat = beat;
+    const beatName = sectionBeat || beat;
+    return !beatName || beatName === row.beatName ? row : { ...row, beatName };
+  });
+}
+
+/** Collapse “Pitam pura 1” / “PITAMPURA 1” onto the spelling used by the shops. */
+function canonicalizeBeatNames(rows: ParsedImportRow[]) {
+  const counts = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    if (!row.ready) continue;
+    const beat = realBeatLabel(row.beatName);
+    if (!beat) continue;
+    const key = beatKey(beat);
+    const spellings = counts.get(key) ?? new Map<string, number>();
+    spellings.set(beat, (spellings.get(beat) ?? 0) + 1);
+    counts.set(key, spellings);
+  }
+  const canonical = new Map<string, string>();
+  for (const [key, spellings] of counts) {
+    const best = [...spellings.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0]?.[0];
+    if (best) canonical.set(key, best);
+  }
+  return rows.map((row) => {
+    const beat = realBeatLabel(row.beatName);
+    if (!beat) return row;
+    const name = canonical.get(beatKey(beat)) ?? beat;
+    return name === row.beatName ? row : { ...row, beatName: name };
+  });
+}
+
+function prepareImportRows(rows: Record<string, unknown>[]) {
+  return canonicalizeBeatNames(
+    stabilizeBeatByMsl(fillDownSheetNames(rows.map(parseImportRow))),
+  ).filter((row) => !row.blank);
 }
 
 /** Accept a 10-digit mobile, or 91 / leading 0 in front of one. */
@@ -498,6 +634,7 @@ type ParsedImportRow = {
   longitude: number | null;
   beatName: string;
   hqName: string;
+  mslNo: number | null;
   ready: boolean;
   reason: string;
   blank: boolean;
@@ -512,8 +649,11 @@ function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImpo
     ["retailer", "salon", "outlet", "parlour", "parlor"],
   );
   const { phone, raw: rawPhone } = mobileFromRow(raw);
-  const beatName = cell(raw, ["beatname", "beat"]);
-  const hqName = cell(raw, ["hqname", "hq"]);
+  const beatName = beatNameFromRow(raw);
+  const hqName = cell(raw, ["hqname", "hq", "headquarters", "headquarter"]);
+  const mslRaw = cell(raw, ["mslno", "msl", "mslnumber"]);
+  const mslParsed = mslRaw ? Number(mslRaw.replace(/[^\d]/g, "")) : NaN;
+  const mslNo = Number.isFinite(mslParsed) && mslParsed > 0 ? mslParsed : null;
   const contactPerson =
     cell(raw, ["contactpersonname", "contactperson", "person", "ownername"]) ||
     cell(raw, ["storemgrname", "storemanager", "managername"]);
@@ -528,7 +668,9 @@ function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImpo
   const potentialRaw = cell(raw, ["avgsales", "potential", "value", "amount"]);
   const potentialNum = potentialRaw ? Number(potentialRaw.replace(/[^\d.]/g, "")) : undefined;
   const repeatedHeader = headerKey(name) === "retailername" || headerKey(beatName) === "beatname";
-  const blank = repeatedHeader || (!name && !phone && !rawPhone && !beatName && !street && !city);
+  // Beat title rows like “Pitam pura 1” with no shop — keep the name for fill-down, drop from the import list.
+  const sectionOnly = Boolean(beatName || hqName) && !name && !phone && !rawPhone && !street && !city;
+  const blank = repeatedHeader || sectionOnly || (!name && !phone && !rawPhone && !beatName && !street && !city);
   const phoneNote = !blank && rawPhone && !phone ? `Mobile on sheet: ${rawPhone}` : "";
   const notes = [sheetNotes(raw), phoneNote].filter(Boolean).join("\n");
   let reason = "";
@@ -549,6 +691,7 @@ function parseImportRow(raw: Record<string, unknown>, index: number): ParsedImpo
     longitude,
     beatName,
     hqName,
+    mslNo,
     ready: !blank && !reason,
     reason,
     blank,
@@ -595,10 +738,7 @@ export async function previewLeadImport(input: {
   rows: Record<string, unknown>[];
 }) {
   if (!isManager(input.roles)) throw forbidden("Only managers import leads.");
-  const parsed = await markImportDuplicates(
-    input.tenantId,
-    input.rows.map(parseImportRow).filter((row) => !row.blank),
-  );
+  const parsed = await markImportDuplicates(input.tenantId, prepareImportRows(input.rows));
   return {
     rows: parsed.map(publicImportRow),
     ready: parsed.filter((row) => row.ready).length,
@@ -618,10 +758,7 @@ export async function importLeads(input: {
   if (!isManager(input.roles)) {
     throw forbidden("Only managers import leads.");
   }
-  const parsed = await markImportDuplicates(
-    input.tenantId,
-    input.rows.map(parseImportRow).filter((row) => !row.blank),
-  );
+  const parsed = await markImportDuplicates(input.tenantId, prepareImportRows(input.rows));
   const created: ReturnType<typeof publicLead>[] = [];
   const skipped: { row: number; name: string; phone: string; reason: string }[] = [];
   const sequence = new Map<number, number>();
@@ -647,10 +784,10 @@ export async function importLeads(input: {
       where: { tenantId: input.tenantId, hqId: hq.id, active: true },
       select: { id: true, name: true, assigneeId: true },
     });
-    const byName = new Map(existing.map((beat) => [beat.name.trim().toLowerCase(), beat]));
+    const byName = new Map(existing.map((beat) => [beatKey(beat.name), beat]));
     for (const beatName of wantedNames) {
       const name = beatName.slice(0, 120);
-      const key = name.toLowerCase();
+      const key = beatKey(name);
       let beat = byName.get(key);
       if (!beat) {
         beat = await prisma.beat.create({
@@ -663,6 +800,8 @@ export async function importLeads(input: {
       beatById.set(beat.id, beat);
       beatIdBySheetName.set(beatName, beat.id);
       beatIdBySheetName.set(name, beat.id);
+      beatIdBySheetName.set(beat.name, beat.id);
+      beatIdBySheetName.set(key, beat.id);
     }
   } else {
     const beatIds = [...new Set(Object.values(beatByName))];
@@ -707,7 +846,10 @@ export async function importLeads(input: {
       skipped.push({ row: row.row, name: row.name, phone: row.rawPhone || row.phone, reason: row.reason });
       continue;
     }
-    const beatId = beatIdBySheetName.get(row.beatName) ?? beatIdBySheetName.get(row.beatName.trim());
+    const beatId =
+      beatIdBySheetName.get(row.beatName) ??
+      beatIdBySheetName.get(row.beatName.trim()) ??
+      beatIdBySheetName.get(beatKey(row.beatName));
     const beat = beatId ? beatById.get(beatId) : undefined;
     if (!beat) {
       skipped.push({
