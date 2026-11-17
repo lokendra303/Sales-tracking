@@ -104,20 +104,37 @@ async function authorizedFetch(path: string, options: RequestInit & { token?: st
   return response;
 }
 
-export async function api<T>(path: string, options: RequestInit & { token?: string | null; retried?: boolean } = {}) {
-  const headers = new Headers(options.headers);
-  if (!headers.has("Content-Type") && options.body) headers.set("Content-Type", "application/json");
-  const response = await authorizedFetch(path, { ...options, headers });
-  const json = (await response.json()) as Envelope<T>;
+async function readEnvelope<T>(response: Response, path: string) {
+  const raw = await response.text();
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.startsWith("<!") || trimmed.startsWith("<html")) {
+    throw new ApiError(
+      "BAD_RESPONSE",
+      response.status === 404
+        ? `API route missing (${path}). Pull latest on the live server and restart salestrack-api.`
+        : `API returned a web page instead of data (${path}). Check the live API is up and restarted.`,
+    );
+  }
+  let json: Envelope<T>;
+  try {
+    json = JSON.parse(raw) as Envelope<T>;
+  } catch {
+    throw new ApiError("BAD_RESPONSE", `API returned invalid JSON (${path}).`);
+  }
   if (!json.success) throw new ApiError(json.error.code, json.error.message);
   return json.data;
 }
 
+export async function api<T>(path: string, options: RequestInit & { token?: string | null; retried?: boolean } = {}) {
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type") && options.body) headers.set("Content-Type", "application/json");
+  const response = await authorizedFetch(path, { ...options, headers });
+  return readEnvelope<T>(response, path);
+}
+
 export async function apiForm<T>(path: string, options: { token?: string | null; form: FormData }) {
   const response = await authorizedFetch(path, { method: "POST", token: options.token, body: options.form });
-  const json = (await response.json()) as Envelope<T>;
-  if (!json.success) throw new ApiError(json.error.code, json.error.message);
-  return json.data;
+  return readEnvelope<T>(response, path);
 }
 
 export async function apiBlob(path: string, token: string) {
