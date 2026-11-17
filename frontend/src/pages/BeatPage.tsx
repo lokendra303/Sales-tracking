@@ -159,7 +159,10 @@ export function BeatPage() {
   const [beatFormOpen, setBeatFormOpen] = useState(false);
   const [manageHqs, setManageHqs] = useState(false);
   const [detailTab, setDetailTab] = useState<"shops" | "plan">("shops");
+  const [planMode, setPlanMode] = useState<"dates" | "repeat">("dates");
   const [addStopOpen, setAddStopOpen] = useState(false);
+  /** Draft salesperson before OK — selecting a name alone does not save. */
+  const [assigneeDraft, setAssigneeDraft] = useState<number | "">("");
 
   const selected = beats.find((b) => b.id === selectedBeatId) ?? null;
 
@@ -289,12 +292,24 @@ export function BeatPage() {
     loadSchedule(userId).catch(() => undefined);
   }, [accessToken, userId]);
 
+  // Only reset the Days tab when switching beats. Refreshing after assign/OK used to wipe
+  // unsaved calendar clicks, so Visit plan never got today’s date.
   useEffect(() => {
-    const every = selected?.repeatEvery && selected.repeatEvery >= 2 ? selected.repeatEvery : 7;
+    if (!selected) {
+      setRepeatEvery(7);
+      setPlanDays([1, 2, 3, 4, 5, 6, 0]);
+      setPlanDates([]);
+      return;
+    }
+    const every = selected.repeatEvery && selected.repeatEvery >= 2 ? selected.repeatEvery : 7;
     setRepeatEvery(every);
-    setPlanDays(selected?.repeatDays?.length ? selected.repeatDays : every === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
-    setPlanDates(selected?.planDates ?? []);
-  }, [selected?.id, selected?.repeatDays, selected?.repeatEvery, selected?.planDates]);
+    setPlanDays(selected.repeatDays?.length ? selected.repeatDays : every === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
+    setPlanDates(selected.planDates ?? []);
+  }, [selected?.id]);
+
+  useEffect(() => {
+    setAssigneeDraft(selected?.assigneeId ?? "");
+  }, [selected?.id, selected?.assigneeId]);
 
   async function addHq() {
     if (!accessToken || !hqDraft.trim()) return;
@@ -431,20 +446,69 @@ export function BeatPage() {
     }
   }
 
+  function datesDirty(against: string[] | undefined) {
+    const saved = [...(against ?? [])].sort().join(",");
+    const draft = [...planDates].sort().join(",");
+    return saved !== draft;
+  }
+
   async function assignBeat(assigneeId: number | null) {
     if (!accessToken || !selected) return;
+    const current = selected.assigneeId ?? null;
+    const assigneeChanged = assigneeId !== current;
+    const datesChanged = datesDirty(selected.planDates);
+    if (!assigneeChanged && !datesChanged) {
+      setNotice("Nothing to save. Pick a salesperson or click dates on the calendar, then OK.");
+      return;
+    }
+    if (datesChanged && !assigneeId && !current) {
+      setError("Pick a salesperson, then press OK. Dates save with that OK.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      await api(`/beats/${selected.id}`, {
-        method: "PATCH",
-        token: accessToken,
-        body: JSON.stringify({ assigneeId }),
-      });
-      setNotice(assigneeId ? "Salesperson assigned. Save the repeating plan so it becomes their daily task." : "Beat is unassigned.");
+      if (assigneeChanged) {
+        await api(`/beats/${selected.id}`, {
+          method: "PATCH",
+          token: accessToken,
+          body: JSON.stringify({ assigneeId }),
+        });
+      }
+      const ownerId = assigneeId ?? current;
+      let savedDates = selected.planDates ?? [];
+      if (datesChanged && ownerId) {
+        const data = await api<Beat>(`/beats/${selected.id}/dates`, {
+          method: "PUT",
+          token: accessToken,
+          body: JSON.stringify({ dates: planDates }),
+        });
+        savedDates = data.planDates ?? [];
+        setPlanDates(savedDates);
+      }
+      const who =
+        (assigneeId ? people.find((person) => person.userId === assigneeId)?.name : null) ??
+        selected.assigneeName ??
+        "The salesperson";
+      const today = isoToday();
+      if (!ownerId) {
+        setNotice("Beat is unassigned.");
+      } else if (datesChanged && savedDates.length) {
+        const hasToday = savedDates.includes(today);
+        setNotice(
+          `${who} gets “${selected.name}” on ${savedDates.length} date${savedDates.length === 1 ? "" : "s"}.${
+            hasToday ? " Today shows on Visit plan." : " Future days are upcoming."
+          }`,
+        );
+      } else if (datesChanged && !savedDates.length) {
+        setNotice(`${who} is on “${selected.name}”. Date plan cleared.`);
+      } else {
+        setNotice(`${who} assigned to “${selected.name}”. Click dates on Days, then OK again to lock them.`);
+      }
       await loadBeats();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not assign the salesperson.");
+      setError(err instanceof Error ? err.message : "Could not save salesperson or dates.");
+      setAssigneeDraft(selected.assigneeId ?? "");
     } finally {
       setBusy(false);
     }
@@ -474,31 +538,6 @@ export function BeatPage() {
       await loadBeats();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the daily plan.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveDates() {
-    if (!accessToken || !selected) return;
-    setBusy(true);
-    setError("");
-    try {
-      const data = await api<Beat>(`/beats/${selected.id}/dates`, {
-        method: "PUT",
-        token: accessToken,
-        body: JSON.stringify({ dates: planDates }),
-      });
-      const who = data.assigneeName ?? "The salesperson";
-      setNotice(
-        data.planDates?.length
-          ? `${who} gets “${data.name}” on ${data.planDates.length} picked date${data.planDates.length === 1 ? "" : "s"}.`
-          : "Date plan cleared.",
-      );
-      setPlanDates(data.planDates ?? []);
-      await loadBeats();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the date plan.");
     } finally {
       setBusy(false);
     }
@@ -821,21 +860,37 @@ export function BeatPage() {
                       Delete beat
                     </button>
                   </div>
-                  <label className="muted">
-                    Salesperson{" "}
-                    <select
-                      value={selected.assigneeId ?? ""}
-                      onChange={(e) => assignBeat(e.target.value ? Number(e.target.value) : null)}
-                      disabled={busy}
+                  <div className="beat-assign-row">
+                    <label className="muted beat-assign-label">
+                      Salesperson
+                      <select
+                        value={assigneeDraft}
+                        onChange={(e) => setAssigneeDraft(e.target.value ? Number(e.target.value) : "")}
+                        disabled={busy}
+                      >
+                        <option value="">Not assigned</option>
+                        {people.map((person) => (
+                          <option key={person.userId} value={person.userId}>
+                            {person.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="btn green"
+                      type="button"
+                      disabled={
+                        busy ||
+                        ((selected.assigneeId ?? "") === assigneeDraft && !datesDirty(selected.planDates))
+                      }
+                      onClick={() => assignBeat(assigneeDraft === "" ? null : assigneeDraft)}
                     >
-                      <option value="">Not assigned</option>
-                      {people.map((person) => (
-                        <option key={person.userId} value={person.userId}>
-                          {person.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      OK
+                    </button>
+                  </div>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    Click dates on Days, pick the salesperson, then OK — that locks both.
+                  </p>
                   <div className="beat-tabs">
                     <button type="button" className={detailTab === "shops" ? "chip on" : "chip"} onClick={() => setDetailTab("shops")}>
                       Shops
@@ -912,142 +967,145 @@ export function BeatPage() {
                     </>
                   ) : (
                     <>
-                      <p className="muted">
-                        Pick the days this beat repeats. A date you save on the calendar is used instead of the repeating days.
-                      </p>
-                      <div className="toolbar">
-                        <label className="muted">
-                          Repeat every{" "}
-                          <input
-                            type="number"
-                            min={2}
-                            max={30}
-                            value={repeatEvery}
-                            disabled={busy}
-                            onChange={(e) => {
-                              const next = Math.min(30, Math.max(2, Number(e.target.value) || 2));
-                              setRepeatEvery(next);
-                              setPlanDays(next === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
-                            }}
-                            style={{ width: 72 }}
-                          />{" "}
-                          days
-                        </label>
-                        {[7, 15, 30].map((count) => (
-                          <button
-                            key={count}
-                            className={`btn ${repeatEvery === count ? "blue" : ""}`}
-                            type="button"
-                            disabled={busy}
-                            onClick={() => {
-                              setRepeatEvery(count);
-                              setPlanDays(count === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
-                            }}
-                          >
-                            {count}d
-                          </button>
-                        ))}
-                      </div>
-                      <div className="chips">
-                        {repeatEvery === 7
-                          ? DAY_ORDER.map((day) => (
-                              <button
-                                key={day}
-                                type="button"
-                                className={planDays.includes(day) ? "chip on" : "chip"}
-                                onClick={() =>
-                                  setPlanDays((current) =>
-                                    current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
-                                  )
-                                }
-                              >
-                                {DAY_LABEL[day]}
-                              </button>
-                            ))
-                          : Array.from({ length: repeatEvery }, (_, index) => (
-                              <button
-                                key={index}
-                                type="button"
-                                className={planDays.includes(index) ? "chip on" : "chip"}
-                                onClick={() =>
-                                  setPlanDays((current) =>
-                                    current.includes(index) ? current.filter((item) => item !== index) : [...current, index],
-                                  )
-                                }
-                              >
-                                {index + 1}
-                              </button>
-                            ))}
-                        <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveRepeat}>
-                          Save repeating plan
+                      <div className="beat-plan-modes">
+                        <button
+                          type="button"
+                          className={planMode === "dates" ? "chip on" : "chip"}
+                          onClick={() => setPlanMode("dates")}
+                        >
+                          Exact dates
+                        </button>
+                        <button
+                          type="button"
+                          className={planMode === "repeat" ? "chip on" : "chip"}
+                          onClick={() => setPlanMode("repeat")}
+                        >
+                          Repeat
                         </button>
                       </div>
-                      <p className="muted">
-                        {selected.assigneeName
-                          ? `These dates assign “${selected.name}” to ${selected.assigneeName}.`
-                          : "Choose a salesperson before you can save dates."}
-                      </p>
-                      <AssignmentCalendar
-                        month={calMonth}
-                        dates={planDates}
-                        onMonth={setCalMonth}
-                        onToggle={(iso) =>
-                          setPlanDates((current) =>
-                            current.includes(iso) ? current.filter((day) => day !== iso) : [...current, iso].sort(),
-                          )
-                        }
-                      />
-                      {planDates.length ? (
-                        <div className="chips">
-                          {planDates.map((iso) => (
-                            <button key={iso} type="button" className="chip on" onClick={() => setPlanDates((current) => current.filter((day) => day !== iso))}>
-                              {formatPlanDate(iso, true)}
-                            </button>
-                          ))}
+
+                      {planMode === "dates" ? (
+                        <div className="beat-plan-box">
+                          <p className="muted beat-plan-help">
+                            Tap days → choose salesperson → <strong>OK</strong>. Same day can have several beats.
+                          </p>
+                          <AssignmentCalendar
+                            month={calMonth}
+                            dates={planDates}
+                            onMonth={setCalMonth}
+                            onToggle={(iso) =>
+                              setPlanDates((current) =>
+                                current.includes(iso) ? current.filter((day) => day !== iso) : [...current, iso].sort(),
+                              )
+                            }
+                          />
+                          <p className="muted beat-plan-help">
+                            {planDates.length
+                              ? `${planDates.length} day${planDates.length === 1 ? "" : "s"} picked${
+                                  planDates.includes(isoToday()) ? " · today included" : ""
+                                }. Press OK to lock.`
+                              : selected.assigneeId
+                                ? "No days picked yet."
+                                : "Pick days, then salesperson + OK."}
+                          </p>
+                          {dateRows.length ? (
+                            <details className="beat-plan-details">
+                              <summary>
+                                All saved dates · {dateRows.length}
+                              </summary>
+                              <div className="list plan-list">
+                                {dateRows.map((row) => (
+                                  <button
+                                    key={`${row.beatId}-${row.iso}`}
+                                    type="button"
+                                    className={`card person pick stop-row ${selectedBeatId === row.beatId ? "picked" : ""}`}
+                                    onClick={() => {
+                                      setSelectedBeatId(row.beatId);
+                                      setDetailTab("plan");
+                                      setPlanMode("dates");
+                                      const [year, month] = row.iso.split("-").map(Number);
+                                      if (year && month) setCalMonth(new Date(year, month - 1, 1));
+                                    }}
+                                  >
+                                    <div>
+                                      <strong>{formatPlanDate(row.iso, true)}</strong>
+                                      <div className="muted">
+                                        {row.beatName} · {row.person}
+                                      </div>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </details>
+                          ) : null}
                         </div>
                       ) : (
-                        <p className="muted">No dates yet. Click a day on the calendar.</p>
-                      )}
-                      <div className="toolbar">
-                        <button className="btn green" type="button" disabled={busy || !selected.assigneeId} onClick={saveDates}>
-                          Save dates
-                        </button>
-                        <span className="muted">
-                          {selected.assigneeId
-                            ? planDates.length
-                              ? `${planDates.length} date${planDates.length === 1 ? "" : "s"} selected.`
-                              : "Save with no dates to clear this plan."
-                            : "Assign a salesperson before saving dates."}
-                        </span>
-                      </div>
-                      {dateRows.length ? (
-                        <>
-                          <h2>Saved dates</h2>
-                          <div className="list plan-list">
-                            {dateRows.map((row) => (
+                        <div className="beat-plan-box">
+                          <p className="muted beat-plan-help">
+                            Auto-repeat every week / cycle. Visit plan picks today’s slot from this.
+                          </p>
+                          <div className="toolbar" style={{ marginTop: 0 }}>
+                            {[7, 15, 30].map((count) => (
                               <button
-                                key={`${row.beatId}-${row.iso}`}
+                                key={count}
+                                className={`btn ${repeatEvery === count ? "blue" : ""}`}
                                 type="button"
-                                className={`card person pick stop-row ${selectedBeatId === row.beatId ? "picked" : ""}`}
+                                disabled={busy}
                                 onClick={() => {
-                                  setSelectedBeatId(row.beatId);
-                                  setDetailTab("plan");
-                                  const [year, month] = row.iso.split("-").map(Number);
-                                  if (year && month) setCalMonth(new Date(year, month - 1, 1));
+                                  setRepeatEvery(count);
+                                  setPlanDays(count === 7 ? [1, 2, 3, 4, 5, 6, 0] : [0]);
                                 }}
                               >
-                                <div>
-                                  <strong>{formatPlanDate(row.iso, true)}</strong>
-                                  <div className="muted">
-                                    {row.beatName} · {row.hq}
-                                  </div>
-                                </div>
-                                <strong>{row.person}</strong>
+                                Every {count}d
                               </button>
                             ))}
                           </div>
-                        </>
-                      ) : null}
+                          <div className="chips">
+                            {repeatEvery === 7
+                              ? DAY_ORDER.map((day) => (
+                                  <button
+                                    key={day}
+                                    type="button"
+                                    className={planDays.includes(day) ? "chip on" : "chip"}
+                                    onClick={() =>
+                                      setPlanDays((current) =>
+                                        current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
+                                      )
+                                    }
+                                  >
+                                    {DAY_LABEL[day]}
+                                  </button>
+                                ))
+                              : Array.from({ length: repeatEvery }, (_, index) => (
+                                  <button
+                                    key={index}
+                                    type="button"
+                                    className={planDays.includes(index) ? "chip on" : "chip"}
+                                    onClick={() =>
+                                      setPlanDays((current) =>
+                                        current.includes(index)
+                                          ? current.filter((item) => item !== index)
+                                          : [...current, index],
+                                      )
+                                    }
+                                  >
+                                    Day {index + 1}
+                                  </button>
+                                ))}
+                          </div>
+                          <button
+                            className="btn green"
+                            type="button"
+                            disabled={busy || !selected.assigneeId}
+                            onClick={saveRepeat}
+                          >
+                            Save repeat
+                          </button>
+                          {!selected.assigneeId ? (
+                            <p className="muted beat-plan-help">Assign a salesperson first.</p>
+                          ) : null}
+                        </div>
+                      )}
                     </>
                   )}
                 </section>

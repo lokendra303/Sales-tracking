@@ -620,7 +620,7 @@ export async function updateBeat(input: {
   roles: RoleCode[];
   id: number;
   name?: string;
-  assigneeId?: number;
+  assigneeId?: number | null;
   territory?: string | null;
   notes?: string | null;
 }) {
@@ -629,7 +629,7 @@ export async function updateBeat(input: {
   if (!existing) throw notFound("Beat not found.");
   if (input.assigneeId) await requireSalesUser(input.tenantId, input.assigneeId);
 
-  const assigneeChanging = input.assigneeId != null && input.assigneeId !== existing.assigneeId;
+  const assigneeChanging = input.assigneeId !== undefined && input.assigneeId !== existing.assigneeId;
   const beat = await prisma.beat.update({
     where: { id: existing.id },
     data: {
@@ -637,6 +637,8 @@ export async function updateBeat(input: {
       ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
       ...(input.territory !== undefined ? { territory: input.territory?.trim() || null } : {}),
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+      // Clearing the salesperson also clears the date plan so Visit plan does not keep empty days.
+      ...(input.assigneeId === null ? { planDates: null } : {}),
       active: true,
     },
     include: {
@@ -761,17 +763,7 @@ export async function setBeatDates(input: {
   if (dates.length && !beat._count.members) {
     throw badRequest("Add at least one shop before the date plan.");
   }
-  if (beat.assigneeId && dates.length) {
-    const siblings = await prisma.beat.findMany({
-      where: { tenantId: input.tenantId, assigneeId: beat.assigneeId, id: { not: beat.id }, planDates: { not: null } },
-      select: { id: true, planDates: true },
-    });
-    for (const row of siblings) {
-      const left = parsePlanDates(row.planDates).filter((day) => !dates.includes(day));
-      if (left.length === parsePlanDates(row.planDates).length) continue;
-      await prisma.beat.update({ where: { id: row.id }, data: { planDates: formatPlanDates(left) } });
-    }
-  }
+  // Multiple beats may share the same calendar day for one salesperson.
   await prisma.beat.update({
     where: { id: beat.id },
     data: { planDates: formatPlanDates(dates) },
@@ -889,6 +881,74 @@ export async function reorderBeatMembers(input: {
   return publicBeat(fresh!);
 }
 
+/** Future planned beats for the phone — read-only, does not create BeatStop rows. */
+export async function listUpcoming(tenantId: number, userId: number, horizonDays = 30) {
+  await requireSalesUser(tenantId, userId);
+  const today = isoDay();
+  const horizon = Math.min(90, Math.max(1, horizonDays));
+  const byDate = new Map<
+    string,
+    { date: string; beatId: number; beatName: string; territory: string | null; shops: number }
+  >();
+
+  const datedBeats = await prisma.beat.findMany({
+    where: { tenantId, assigneeId: userId, active: true, planDates: { not: null } },
+    select: {
+      id: true,
+      name: true,
+      territory: true,
+      planDates: true,
+      _count: { select: { members: true } },
+    },
+  });
+  for (const beat of datedBeats) {
+    for (const date of parsePlanDates(beat.planDates)) {
+      if (date <= today) continue;
+      byDate.set(date, {
+        date,
+        beatId: beat.id,
+        beatName: beat.name,
+        territory: beat.territory,
+        shops: beat._count.members,
+      });
+    }
+  }
+
+  const plan = await prisma.beatPlan.findFirst({ where: { tenantId, userId } });
+  if (plan) {
+    const startIso = calendarIso(plan.startDate);
+    const slots = await prisma.beatSchedule.findMany({
+      where: { tenantId, userId },
+      include: {
+        beat: { select: { id: true, name: true, territory: true, _count: { select: { members: true } } } },
+      },
+    });
+    const slotByDay = new Map(slots.map((row) => [row.dayIndex, row]));
+    for (let offset = 1; offset <= horizon; offset++) {
+      const cursor = parseDay(today).start;
+      cursor.setDate(cursor.getDate() + offset);
+      const date = isoDay(cursor);
+      if (byDate.has(date)) continue;
+      const dayIndex = cycleDayIndex(startIso, plan.cycleLength, date);
+      if (dayIndex == null) continue;
+      const slot = slotByDay.get(dayIndex);
+      if (!slot?.beat) continue;
+      byDate.set(date, {
+        date,
+        beatId: slot.beat.id,
+        beatName: slot.beat.name,
+        territory: slot.beat.territory,
+        shops: slot.beat._count.members,
+      });
+    }
+  }
+
+  return {
+    today,
+    days: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)),
+  };
+}
+
 export async function getSchedule(tenantId: number, userId: number, forDate = isoDay()) {
   await requireSalesUser(tenantId, userId);
   let plan = await prisma.beatPlan.findFirst({ where: { tenantId, userId } });
@@ -989,46 +1049,41 @@ export async function putSchedule(input: {
   return getSchedule(input.tenantId, user.id);
 }
 
-async function materializeBeatDay(
-  tenantId: number,
-  userId: number,
-  date: string,
-  beat: {
-    id: number;
-    name: string;
-    territory: string | null;
-    active: boolean;
-    members: { leadId: number | null; customerId: number | null }[];
-  },
-) {
+type DayBeat = {
+  id: number;
+  name: string;
+  territory: string | null;
+  active: boolean;
+  members: { leadId: number | null; customerId: number | null }[];
+};
+
+/** Add this beat’s shops for the day without wiping other beats on the same day. */
+async function materializeBeatDay(tenantId: number, userId: number, date: string, beat: DayBeat) {
   if (!beat.active) {
     await prisma.beat.update({ where: { id: beat.id }, data: { active: true } });
   }
   const existing = await stopsForDay(tenantId, userId, date);
   const fromThisBeat = existing.filter((stop) => stop.beatId === beat.id);
-  if (!fromThisBeat.length) {
-    const otherIds = existing.filter((stop) => stop.beatId !== beat.id).map((stop) => stop.id);
-    if (otherIds.length) {
-      const used = await prisma.visit.count({ where: { beatStopId: { in: otherIds } } });
-      if (used === 0) {
-        await prisma.beatStop.deleteMany({ where: { id: { in: otherIds } } });
-      }
-    }
-    let sequence = 0;
-    for (const member of beat.members) {
-      sequence += 1;
-      await prisma.beatStop.create({
-        data: {
-          tenantId,
-          userId,
-          beatId: beat.id,
-          leadId: member.leadId,
-          customerId: member.customerId,
-          sequence,
-          plannedAt: plannedAtFor(date, sequence),
-        },
-      });
-    }
+  let sequence = existing.reduce((max, stop) => Math.max(max, stop.sequence), 0);
+  for (const member of beat.members) {
+    const alreadyOnThisBeat = fromThisBeat.some(
+      (stop) =>
+        Boolean(member.leadId && stop.leadId === member.leadId) ||
+        Boolean(member.customerId && stop.customerId === member.customerId),
+    );
+    if (alreadyOnThisBeat) continue;
+    sequence += 1;
+    await prisma.beatStop.create({
+      data: {
+        tenantId,
+        userId,
+        beatId: beat.id,
+        leadId: member.leadId,
+        customerId: member.customerId,
+        sequence,
+        plannedAt: plannedAtFor(date, sequence),
+      },
+    });
   }
   const stops = await stopsForDay(tenantId, userId, date);
   return {
@@ -1043,14 +1098,55 @@ async function materializeBeatDay(
   };
 }
 
-/** Materialize today's BeatStop rows from a picked date, or else the repeating plan. */
+function combinedDayBeat(beats: DayBeat[]) {
+  if (!beats.length) return null;
+  if (beats.length === 1) {
+    return {
+      id: beats[0].id,
+      name: beats[0].name,
+      territory: beats[0].territory,
+      size: beats[0].members.length,
+    };
+  }
+  return {
+    id: beats[0].id,
+    name: beats.map((beat) => beat.name).join(" · "),
+    territory: beats.map((beat) => beat.territory).filter(Boolean)[0] ?? null,
+    size: beats.reduce((sum, beat) => sum + beat.members.length, 0),
+  };
+}
+
+/** Materialize today’s BeatStop rows from picked dates (many beats OK), or the repeating plan. */
 export async function ensureScheduledDayStops(tenantId: number, userId: number, date = isoDay()) {
   const datedBeats = await prisma.beat.findMany({
     where: { tenantId, assigneeId: userId, active: true, planDates: { not: null } },
     include: { members: { include: memberInclude, orderBy: { sequence: "asc" } } },
+    orderBy: { name: "asc" },
   });
-  const dated = datedBeats.find((beat) => parsePlanDates(beat.planDates).includes(date));
-  if (dated) return materializeBeatDay(tenantId, userId, date, dated);
+  const forDay = datedBeats.filter((beat) => parsePlanDates(beat.planDates).includes(date));
+  if (forDay.length) {
+    const allowed = new Set(forDay.map((beat) => beat.id));
+    for (const beat of forDay) {
+      await materializeBeatDay(tenantId, userId, date, beat);
+    }
+    const { start, end } = parseDay(date);
+    const dayStops = await prisma.beatStop.findMany({
+      where: { tenantId, userId, plannedAt: { gte: start, lte: end } },
+      select: { id: true, beatId: true, visits: { select: { id: true } } },
+    });
+    const orphanIds = dayStops
+      .filter((stop) => stop.beatId != null && !allowed.has(stop.beatId) && stop.visits.length === 0)
+      .map((stop) => stop.id);
+    if (orphanIds.length) {
+      await prisma.beatStop.deleteMany({ where: { id: { in: orphanIds } } });
+    }
+    const fresh = await stopsForDay(tenantId, userId, date);
+    return {
+      beat: combinedDayBeat(forDay),
+      stops: fresh,
+      planned: fresh.length > 0,
+    };
+  }
 
   const plan = await prisma.beatPlan.findFirst({ where: { tenantId, userId } });
   if (!plan) {
@@ -1139,6 +1235,7 @@ export async function visitPlan(tenantId: number) {
         name: true,
         territory: true,
         assigneeId: true,
+        planDates: true,
         members: {
           orderBy: { sequence: "asc" },
           select: {
@@ -1176,6 +1273,7 @@ export async function visitPlan(tenantId: number) {
         sequence: stop.sequence,
         leadId: stop.leadId,
         customerId: stop.customerId,
+        beatId: stop.beatId,
         name: place?.name ?? "Stop",
         phone: place?.phone ?? null,
         city: place?.city ?? null,
@@ -1183,12 +1281,20 @@ export async function visitPlan(tenantId: number) {
       };
     });
     const done = leads.filter((lead) => lead.state === "done").length;
+    const fromDates = ownedBeats
+      .filter((beat) => beat.assigneeId === person.id && parsePlanDates(beat.planDates).includes(date))
+      .map((beat) => beat.id);
+    const fromStops = ensured.stops
+      .map((stop) => stop.beatId)
+      .filter((id): id is number => typeof id === "number" && id > 0);
+    const todayBeatIds = [...new Set([...fromDates, ...fromStops])];
     rows.push({
       userId: person.id,
       name: person.name,
       beatId: ensured.beat?.id ?? null,
       beatName: ensured.beat?.name ?? null,
       territory: ensured.beat?.territory ?? null,
+      todayBeatIds,
       beats: ownedBeats
         .filter((beat) => beat.assigneeId === person.id)
         .map((beat) => ({
@@ -1196,6 +1302,7 @@ export async function visitPlan(tenantId: number) {
           name: beat.name,
           territory: beat.territory,
           shops: beat.members.length,
+          forToday: todayBeatIds.includes(beat.id),
           leads: beat.members.map((member) => {
             const place = member.lead ?? member.customer;
             return {

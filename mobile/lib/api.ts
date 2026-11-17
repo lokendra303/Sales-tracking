@@ -234,7 +234,22 @@ export type BeatPlan = {
   userId: number;
   userName: string;
   planned: boolean;
+  beatId?: number | null;
+  beatName?: string | null;
   stops: BeatStop[];
+};
+
+export type UpcomingBeatDay = {
+  date: string;
+  beatId: number;
+  beatName: string;
+  territory: string | null;
+  shops: number;
+};
+
+export type UpcomingBeats = {
+  today: string;
+  days: UpcomingBeatDay[];
 };
 
 export type FieldSession = {

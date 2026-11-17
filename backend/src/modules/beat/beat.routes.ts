@@ -301,6 +301,23 @@ beatRouter.get(
   }),
 );
 
+beatRouter.get(
+  "/beat/upcoming",
+  requireRole("MANAGER", "SALES_EXECUTIVE"),
+  asyncHandler(async (req, res) => {
+    const userId = req.query.userId ? Number(req.query.userId) : req.auth!.userId;
+    const isMgr = req.auth!.roles.includes("MANAGER") || req.auth!.roles.includes("ADMIN");
+    if (!isMgr && userId !== req.auth!.userId) throw forbidden("You can only view your own upcoming beats.");
+    const horizon = req.query.days ? Number(req.query.days) : 30;
+    const data = await beat.listUpcoming(
+      req.auth!.tenantId,
+      userId,
+      Number.isFinite(horizon) ? horizon : 30,
+    );
+    res.json({ success: true, data });
+  }),
+);
+
 beatRouter.put(
   "/beat/schedule",
   requireRole("MANAGER"),
