@@ -1057,22 +1057,99 @@ type DayBeat = {
   members: { leadId: number | null; customerId: number | null }[];
 };
 
-/** Add this beat’s shops for the day without wiping other beats on the same day. */
+function stopShopKey(stop: { leadId?: number | null; customerId?: number | null }) {
+  if (stop.leadId != null) return `l:${stop.leadId}`;
+  if (stop.customerId != null) return `c:${stop.customerId}`;
+  return null;
+}
+
+/** Unique shops on the beat (skip empty / duplicate member rows). */
+function uniqueBeatMembers<T extends { leadId: number | null; customerId: number | null }>(members: T[]) {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const member of members) {
+    const key = stopShopKey(member);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(member);
+  }
+  return out;
+}
+
+/**
+ * One stop per shop for this beat on `date`. Pulls back stops that drifted to
+ * tomorrow when plannedAt used hour+=sequence (shop 15 became next-day midnight).
+ */
 async function materializeBeatDay(tenantId: number, userId: number, date: string, beat: DayBeat) {
   if (!beat.active) {
     await prisma.beat.update({ where: { id: beat.id }, data: { active: true } });
   }
-  const existing = await stopsForDay(tenantId, userId, date);
-  const fromThisBeat = existing.filter((stop) => stop.beatId === beat.id);
-  let sequence = existing.reduce((max, stop) => Math.max(max, stop.sequence), 0);
-  for (const member of beat.members) {
-    const alreadyOnThisBeat = fromThisBeat.some(
-      (stop) =>
-        Boolean(member.leadId && stop.leadId === member.leadId) ||
-        Boolean(member.customerId && stop.customerId === member.customerId),
-    );
-    if (alreadyOnThisBeat) continue;
+  const members = uniqueBeatMembers(beat.members);
+  const { start, end } = parseDay(date);
+  const wideStart = new Date(start);
+  wideStart.setDate(wideStart.getDate() - 1);
+  const wideEnd = new Date(end);
+  wideEnd.setDate(wideEnd.getDate() + 2);
+
+  const near = await prisma.beatStop.findMany({
+    where: {
+      tenantId,
+      userId,
+      beatId: beat.id,
+      plannedAt: { gte: wideStart, lte: wideEnd },
+    },
+    select: {
+      id: true,
+      leadId: true,
+      customerId: true,
+      sequence: true,
+      plannedAt: true,
+      visits: { select: { id: true } },
+    },
+    orderBy: { id: "asc" },
+  });
+
+  const byShop = new Map<string, typeof near>();
+  for (const stop of near) {
+    const key = stopShopKey(stop);
+    if (!key) continue;
+    const list = byShop.get(key) ?? [];
+    list.push(stop);
+    byShop.set(key, list);
+  }
+
+  const dayExisting = await stopsForDay(tenantId, userId, date);
+  let sequence = dayExisting
+    .filter((stop) => stop.beatId !== beat.id)
+    .reduce((max, stop) => Math.max(max, stop.sequence), 0);
+
+  const removeIds: number[] = [];
+  for (const member of members) {
+    const key = stopShopKey(member)!;
+    const candidates = byShop.get(key) ?? [];
     sequence += 1;
+    const onToday = candidates.filter((stop) => {
+      if (!stop.plannedAt) return false;
+      return stop.plannedAt >= start && stop.plannedAt <= end;
+    });
+    const prefer =
+      onToday.find((stop) => stop.visits.length > 0) ??
+      onToday[0] ??
+      candidates.find((stop) => stop.visits.length > 0) ??
+      candidates[0] ??
+      null;
+
+    if (prefer) {
+      for (const stop of candidates) {
+        if (stop.id !== prefer.id) removeIds.push(stop.id);
+      }
+      await prisma.beatStop.update({
+        where: { id: prefer.id },
+        data: { sequence, plannedAt: plannedAtFor(date, sequence) },
+      });
+      continue;
+    }
+
     await prisma.beatStop.create({
       data: {
         tenantId,
@@ -1085,13 +1162,26 @@ async function materializeBeatDay(tenantId: number, userId: number, date: string
       },
     });
   }
+
+  // Extra stops for shops no longer on the beat (and no visit yet).
+  const memberKeys = new Set(members.map((member) => stopShopKey(member)!));
+  for (const [key, candidates] of byShop) {
+    if (memberKeys.has(key)) continue;
+    for (const stop of candidates) {
+      if (!stop.visits.length) removeIds.push(stop.id);
+    }
+  }
+  if (removeIds.length) {
+    await prisma.beatStop.deleteMany({ where: { id: { in: [...new Set(removeIds)] } } });
+  }
+
   const stops = await stopsForDay(tenantId, userId, date);
   return {
     beat: {
       id: beat.id,
       name: beat.name,
       territory: beat.territory,
-      size: beat.members.length,
+      size: members.length,
     },
     stops,
     planned: stops.length > 0,
@@ -1297,24 +1387,27 @@ export async function visitPlan(tenantId: number) {
       todayBeatIds,
       beats: ownedBeats
         .filter((beat) => beat.assigneeId === person.id)
-        .map((beat) => ({
-          id: beat.id,
-          name: beat.name,
-          territory: beat.territory,
-          shops: beat.members.length,
-          forToday: todayBeatIds.includes(beat.id),
-          leads: beat.members.map((member) => {
-            const place = member.lead ?? member.customer;
-            return {
-              sequence: member.sequence,
-              leadId: member.leadId,
-              customerId: member.customerId,
-              name: place?.name ?? "Stop",
-              phone: place?.phone ?? null,
-              city: place?.city ?? null,
-            };
-          }),
-        })),
+        .map((beat) => {
+          const shops = uniqueBeatMembers(beat.members);
+          return {
+            id: beat.id,
+            name: beat.name,
+            territory: beat.territory,
+            shops: shops.length,
+            forToday: todayBeatIds.includes(beat.id),
+            leads: shops.map((member, index) => {
+              const place = member.lead ?? member.customer;
+              return {
+                sequence: member.sequence ?? index + 1,
+                leadId: member.leadId,
+                customerId: member.customerId,
+                name: place?.name ?? "Stop",
+                phone: place?.phone ?? null,
+                city: place?.city ?? null,
+              };
+            }),
+          };
+        }),
       leads,
       total: leads.length,
       done,

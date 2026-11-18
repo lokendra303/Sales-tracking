@@ -220,30 +220,35 @@ export function VisitPlanPage() {
         : namedBeats[0]?.id ?? null;
   const activeBeat = namedBeats.find((beat) => beat.id === activeBeatId) ?? null;
   const viewingToday = Boolean(activeBeat?.forToday || (activeBeatId && todayIds.has(activeBeatId)));
+  /** Always the beat’s own shops — never mix in another beat’s stops for the same day. */
   const activeTodayLeads = viewingToday
     ? (() => {
         if (!activeBeat || !selected) return [];
-        const fromStops = selected.leads.filter(
-          (lead) =>
-            lead.beatId === activeBeat.id ||
-            activeBeat.leads.some(
-              (shop) =>
-                Boolean(lead.leadId && shop.leadId === lead.leadId) ||
-                Boolean(lead.customerId && shop.customerId === lead.customerId),
-            ),
-        );
-        if (fromStops.length) return fromStops;
-        // Dates say today but stops not built yet — still show shops as Left.
-        return activeBeat.leads.map((shop) => ({
-          sequence: shop.sequence,
-          leadId: shop.leadId,
-          customerId: shop.customerId,
-          beatId: activeBeat.id,
-          name: shop.name,
-          phone: shop.phone,
-          city: shop.city,
-          state: "left" as const,
-        }));
+        return activeBeat.leads.map((shop) => {
+          const sameBeat = selected.leads.find(
+            (lead) =>
+              lead.beatId === activeBeat.id &&
+              (Boolean(shop.leadId && lead.leadId === shop.leadId) ||
+                Boolean(shop.customerId && lead.customerId === shop.customerId)),
+          );
+          const anyToday =
+            sameBeat ??
+            selected.leads.find(
+              (lead) =>
+                Boolean(shop.leadId && lead.leadId === shop.leadId) ||
+                Boolean(shop.customerId && lead.customerId === shop.customerId),
+            );
+          return {
+            sequence: shop.sequence,
+            leadId: shop.leadId,
+            customerId: shop.customerId,
+            beatId: activeBeat.id,
+            name: shop.name,
+            phone: shop.phone,
+            city: shop.city,
+            state: (sameBeat?.state ?? anyToday?.state ?? "left") as PlanLead["state"],
+          };
+        });
       })()
     : [];
   const totals = people.reduce(

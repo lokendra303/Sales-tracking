@@ -39,7 +39,10 @@ export function calendarToDate(iso: string) {
 export function plannedAtFor(date: string, sequence: number) {
   const { start } = parseDay(date);
   const planned = new Date(start);
-  planned.setHours(10 + Math.max(0, sequence - 1), 0, 0, 0);
+  // Stay on the same calendar day. Using hours+=sequence used to push stop 15 to tomorrow
+  // (setHours(24)), so Visit plan kept rematerializing and counts blew past the beat size.
+  const offset = Math.max(0, sequence - 1);
+  planned.setHours(8, Math.min(offset, 14 * 60 - 1), 0, 0);
   return planned;
 }
 
