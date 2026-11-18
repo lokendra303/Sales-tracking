@@ -413,9 +413,11 @@ export function VisitPlanPage() {
                 </span>
               )}
             </div>
-            <button className="btn" type="button" disabled={busyId === selected.userId} onClick={() => openUnassign(selected)}>
-              Unassign salesperson
-            </button>
+            {selected.beats.some((beat) => beat.shops > 0) ? (
+              <button className="btn" type="button" disabled={busyId === selected.userId} onClick={() => openUnassign(selected)}>
+                Unassign salesperson
+              </button>
+            ) : null}
           </article>
           {namedBeats.length ? (
             <>
@@ -540,9 +542,11 @@ export function VisitPlanPage() {
                       </div>
                     )}
                   </button>
-                  <button className="btn" type="button" disabled={busyId === person.userId} onClick={() => openUnassign(person)}>
-                    Unassign
-                  </button>
+                  {beatCount > 0 ? (
+                    <button className="btn" type="button" disabled={busyId === person.userId} onClick={() => openUnassign(person)}>
+                      Unassign
+                    </button>
+                  ) : null}
                 </article>
               );
             })}
