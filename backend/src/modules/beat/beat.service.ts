@@ -587,10 +587,11 @@ export async function deleteBeat(tenantId: number, roles: RoleCode[], id: number
   if (!isManager(roles)) throw forbidden("Only a manager can delete a beat.");
   const existing = await prisma.beat.findFirst({ where: { id, tenantId }, select: { id: true, name: true } });
   if (!existing) throw notFound("Beat not found.");
+  // Delete stops (visits keep working via beatStopId SetNull). Do not leave beatId-null ghosts — they double Visit plan counts.
   await prisma.$transaction([
     prisma.beatMember.deleteMany({ where: { beatId: existing.id } }),
     prisma.beatSchedule.deleteMany({ where: { beatId: existing.id } }),
-    prisma.beatStop.updateMany({ where: { beatId: existing.id }, data: { beatId: null } }),
+    prisma.beatStop.deleteMany({ where: { beatId: existing.id } }),
     prisma.beat.delete({ where: { id: existing.id } }),
   ]);
   return { deleted: true, name: existing.name };
@@ -609,7 +610,7 @@ export async function deleteBeats(tenantId: number, roles: RoleCode[], ids: numb
   await prisma.$transaction([
     prisma.beatMember.deleteMany({ where: { beatId: { in: beatIds } } }),
     prisma.beatSchedule.deleteMany({ where: { beatId: { in: beatIds } } }),
-    prisma.beatStop.updateMany({ where: { beatId: { in: beatIds } }, data: { beatId: null } }),
+    prisma.beatStop.deleteMany({ where: { beatId: { in: beatIds } } }),
     prisma.beat.deleteMany({ where: { tenantId, id: { in: beatIds } } }),
   ]);
   return { deleted: beatIds.length };
@@ -682,6 +683,15 @@ export async function updateBeat(input: {
     await prisma.beatSchedule.deleteMany({
       where: { tenantId: input.tenantId, userId: existing.assigneeId, beatId: beat.id },
     });
+    // Drop unused day stops for the old assignee so Visit plan does not keep deleted/unassigned shops.
+    const oldStops = await prisma.beatStop.findMany({
+      where: { tenantId: input.tenantId, userId: existing.assigneeId, beatId: beat.id },
+      select: { id: true, visits: { select: { id: true } } },
+    });
+    const unused = oldStops.filter((stop) => !stop.visits.length).map((stop) => stop.id);
+    if (unused.length) {
+      await prisma.beatStop.deleteMany({ where: { id: { in: unused } } });
+    }
   }
   if (assigneeChanging && beat.assigneeId && beat.repeatDays) {
     const every = storedEvery(beat) ?? 7;
@@ -1222,13 +1232,43 @@ export async function ensureScheduledDayStops(tenantId: number, userId: number, 
     const { start, end } = parseDay(date);
     const dayStops = await prisma.beatStop.findMany({
       where: { tenantId, userId, plannedAt: { gte: start, lte: end } },
-      select: { id: true, beatId: true, visits: { select: { id: true } } },
+      select: { id: true, beatId: true, leadId: true, customerId: true, visits: { select: { id: true } } },
     });
+    // Ghosts from deleted beats (beatId null) and stops for beats not on today's plan.
     const orphanIds = dayStops
-      .filter((stop) => stop.beatId != null && !allowed.has(stop.beatId) && stop.visits.length === 0)
+      .filter((stop) => stop.visits.length === 0 && (stop.beatId == null || !allowed.has(stop.beatId)))
       .map((stop) => stop.id);
     if (orphanIds.length) {
       await prisma.beatStop.deleteMany({ where: { id: { in: orphanIds } } });
+    }
+    // Same shop twice today (old ghost + new beat) — keep one with a visit, else the allowed-beat row.
+    const afterOrphans = await prisma.beatStop.findMany({
+      where: { tenantId, userId, plannedAt: { gte: start, lte: end } },
+      select: { id: true, beatId: true, leadId: true, customerId: true, visits: { select: { id: true } } },
+      orderBy: { id: "asc" },
+    });
+    const byShop = new Map<string, typeof afterOrphans>();
+    for (const stop of afterOrphans) {
+      const key = stopShopKey(stop);
+      if (!key) continue;
+      const list = byShop.get(key) ?? [];
+      list.push(stop);
+      byShop.set(key, list);
+    }
+    const dupIds: number[] = [];
+    for (const list of byShop.values()) {
+      if (list.length < 2) continue;
+      const keep =
+        list.find((stop) => stop.visits.length > 0 && stop.beatId != null && allowed.has(stop.beatId)) ??
+        list.find((stop) => stop.beatId != null && allowed.has(stop.beatId)) ??
+        list.find((stop) => stop.visits.length > 0) ??
+        list[0];
+      for (const stop of list) {
+        if (stop.id !== keep.id && stop.visits.length === 0) dupIds.push(stop.id);
+      }
+    }
+    if (dupIds.length) {
+      await prisma.beatStop.deleteMany({ where: { id: { in: dupIds } } });
     }
     const fresh = await stopsForDay(tenantId, userId, date);
     return {
